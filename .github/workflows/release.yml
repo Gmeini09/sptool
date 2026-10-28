@@ -1,0 +1,38 @@
+# Windows release pipeline: test → build → package → hash → upload.
+# Code signing is wired in once a certificate is available (see docs/DEPLOYMENT.md).
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm install   # switch to `npm ci` once package-lock.json is committed
+      - run: npm run typecheck
+      - run: npm test
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run tauri:build
+        env:
+          SPTOOL_API_URL: ${{ secrets.SPTOOL_API_URL }}
+          SPTOOL_LICENSE_PUBKEY: ${{ secrets.SPTOOL_LICENSE_PUBKEY }}
+      - name: Rename installer and hash
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $exe.FullName SPTool_Setup.exe
+          (Get-FileHash SPTool_Setup.exe -Algorithm SHA256).Hash | Out-File SPTool_Setup.exe.sha256 -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SPTool-windows
+          path: |
+            SPTool_Setup.exe
+            SPTool_Setup.exe.sha256

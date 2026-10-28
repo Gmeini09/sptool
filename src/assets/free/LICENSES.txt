@@ -1,0 +1,10 @@
+Freie Reload-Sounds in SP Tool – alle CC0 1.0 (gemeinfrei), https://creativecommons.org/publicdomain/zero/1.0/
+
+reload-zer0sol.wav          "Handgun Reload Sound Effect" von zer0_sol
+                            https://opengameart.org/content/handgun-reload-sound-effect (Datei reload.wav)
+reload-springyspringo.wav   "Gun reload sounds" von SpringySpringo
+                            https://opengameart.org/content/gun-reload-sounds (Datei gunreload1.wav)
+clip-bmaczero-1.wav         "Gun Reload Sound Effects" von BMacZero (Brian MacIntosh)
+clip-bmaczero-2.wav         https://opengameart.org/content/gun-reload-sound-effects (Dateien clipload1.wav, clipload2.wav)
+
+Heruntergeladen am 28.10.2026. Namensnennung ist nicht nötig, wird von den Autoren aber gern gesehen.

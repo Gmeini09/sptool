@@ -1,0 +1,84 @@
+{
+  "$comment": "audioContainer and installMapping stay null until the stream-to-slot mapping and install location are verified (spec \u00a7165/\u00a7166). Suppressor is the only attachment SP Tool handles.",
+  "id": "pistol_mk2",
+  "displayName": "Pistol MK2",
+  "internalName": "WEAPON_PISTOL_MK2",
+  "shortName": "MK2",
+  "previewModel": null,
+  "slots": [
+    {
+      "id": "fire",
+      "label": "Fire",
+      "type": "fire",
+      "required": true
+    },
+    {
+      "id": "suppressed_fire",
+      "label": "Suppressed Fire",
+      "type": "suppressor",
+      "required": true
+    },
+    {
+      "id": "mag_out",
+      "label": "Magazine Out",
+      "type": "reload",
+      "required": false
+    },
+    {
+      "id": "mag_in",
+      "label": "Magazine In",
+      "type": "reload",
+      "required": false
+    },
+    {
+      "id": "slide",
+      "label": "Slide",
+      "type": "mechanical",
+      "required": false
+    },
+    {
+      "id": "reload_finish",
+      "label": "Reload Finish",
+      "type": "reload",
+      "required": false
+    },
+    {
+      "id": "dry_fire",
+      "label": "Dry Fire",
+      "type": "handling",
+      "required": false
+    },
+    {
+      "id": "draw",
+      "label": "Draw",
+      "type": "handling",
+      "required": false
+    },
+    {
+      "id": "holster",
+      "label": "Holster",
+      "type": "handling",
+      "required": false
+    }
+  ],
+  "audioContainer": null,
+  "installMapping": null,
+  "supportedFeatures": [
+    "fire",
+    "suppressor",
+    "reload",
+    "handling"
+  ],
+  "formatStatus": "awc-verified;mapping-pending",
+  "attachments": [
+    {
+      "component": "COMPONENT_AT_PI_SUPP_02",
+      "label": "Suppressor",
+      "kind": "suppressor",
+      "soundSlots": [
+        "suppressed_fire"
+      ],
+      "note": "The only supported attachment. Its sound is part of every build, otherwise the game plays the original sound with the suppressor equipped."
+    }
+  ]
+}
