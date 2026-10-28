@@ -1,38 +1,51 @@
-# Windows release pipeline: test → build → package → hash → upload.
-# Code signing is wired in once a certificate is available (see docs/DEPLOYMENT.md).
+# Windows release pipeline: test → SPTool.exe (Go) → distribution ZIP → hash → upload.
+# A tag v* (e.g. v1.10.13) also attaches the ZIP to a GitHub release; "Run workflow" by hand only keeps it as an
+# artifact for 30 days. Code signing is wired in once a certificate is available (see docs/DEPLOYMENT.md).
 name: release
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write # create the release for a tag
+
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      # both values are public (the API address and the public key are inside every SPTool.exe); secrets win if set
+      SPTOOL_API_URL: ${{ secrets.SPTOOL_API_URL || 'https://bot-production-d58c.up.railway.app' }}
+      SPTOOL_LICENSE_PUBKEY: ${{ secrets.SPTOOL_LICENSE_PUBKEY || '5iVZDgeKEizromOavt_4watv_TymaL7np_99Lys_gEQ' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with: { workspaces: src-tauri }
-      - run: npm install   # switch to `npm ci` once package-lock.json is committed
-      - run: npm run typecheck
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: windows/go.mod, cache: false }
+      - run: go install github.com/tc-hib/go-winres@v0.3.3
+      - run: npm ci
       - run: npm test
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: npm run tauri:build
-        env:
-          SPTOOL_API_URL: ${{ secrets.SPTOOL_API_URL }}
-          SPTOOL_LICENSE_PUBKEY: ${{ secrets.SPTOOL_LICENSE_PUBKEY }}
-      - name: Rename installer and hash
+      # type check, web build, go-winres, go build, ZIP – the same script as on your PC
+      - run: node scripts/build-windows.mjs
+      - name: Hash
         shell: pwsh
         run: |
-          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          Copy-Item $exe.FullName SPTool_Setup.exe
-          (Get-FileHash SPTool_Setup.exe -Algorithm SHA256).Hash | Out-File SPTool_Setup.exe.sha256 -Encoding ascii
+          foreach ($f in 'release/SPTool.exe', 'release/Turbo_Designs_SP_Tool.zip') {
+            (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() | Out-File "$f.sha256" -Encoding ascii -NoNewline
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: SPTool-windows
+          retention-days: 30
           path: |
-            SPTool_Setup.exe
-            SPTool_Setup.exe.sha256
+            release/SPTool.exe
+            release/Turbo_Designs_SP_Tool.zip
+            release/*.sha256
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true # you check it and publish it yourself
+          files: |
+            release/Turbo_Designs_SP_Tool.zip
+            release/Turbo_Designs_SP_Tool.zip.sha256

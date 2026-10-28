@@ -37,6 +37,8 @@ export interface Settings {
   tourDone: boolean;
   /** Anleitungs-Panel links offen. */
   tutorialOpen: boolean;
+  /** "Soundpack erstellen": own sounds get the loudness of the sound they replace in the template */
+  matchLevel: boolean;
 }
 
 export interface Session {
@@ -81,7 +83,7 @@ export interface AppState {
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'turbo', accent: 'blue', reducedMotion: false, uiScale: 1, hoverPreview: false, volume: 0.85,
   defaultStyle: 'Clean', devMode: false, fivemPath: '', gtaPath: '', analytics: false, crashReports: false, checkUpdates: true,
-  simpleMode: false, hintsSeen: [], tourDone: false, tutorialOpen: false,
+  simpleMode: false, hintsSeen: [], tourDone: false, tutorialOpen: false, matchLevel: false,
 };
 
 const PERSIST: Array<keyof AppState> = ['session', 'onboarded', 'settings', 'favorites', 'recent', 'userEntries', 'collections', 'userTags', 'projects', 'currentProjectId'];

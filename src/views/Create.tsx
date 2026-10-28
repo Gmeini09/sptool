@@ -3,13 +3,13 @@
 // soundpack you have, or pick one from the library – or keep the original. Nothing is installed and no backups
 // are made: WEAPONS_PLAYER.rpf + RESIDENT.rpf go as one ZIP to Downloads › SP Tool › <name>.zip.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addProject, FILES_DROPPED, getState, removeUserEntry, setState, toast, useApp } from '../app/store';
+import { addProject, FILES_DROPPED, getState, removeUserEntry, setState, toast, updateSettings, useApp } from '../app/store';
 import { engine } from '../audio/engine';
 import { previewEntry, usePlayingKey } from '../audio/preview';
 import { BasePicker, useBase } from '../components/BasePicker';
 import { Icon } from '../components/Icon';
 import { PackSoundsDialog } from '../components/PackSounds';
-import { Button, DoneMark, Progress } from '../components/ui';
+import { Button, DoneMark, Progress, Toggle } from '../components/ui';
 import type { AudioData } from '../dsp/types';
 import { classifySound } from '../dsp/classify';
 import { loadMapping, MAPPING_EVENT } from '../formats/mapping';
@@ -24,6 +24,7 @@ import { baseInfo, ensureBase, moreRoomBase } from '../projects/basePack';
 import { soundReport } from '../projects/report';
 import { blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { openPack, type Pack } from '../formats/pack';
+import { streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
@@ -95,6 +96,8 @@ export function CreateView() {
   const lib = useMemo(() => allEntries(), [userEntries]);
   const base = useBase();
   const playing = usePlayingKey();
+  const matchLvl = useApp((s) => s.settings.matchLevel);
+  const layout = { matchLevel: matchLvl };
   const [step, setStep] = useState(0);
   const [style, setStyle] = useState<Style | 'all' | 'featured'>('all');
   const [fire, setFire] = useState<Record<string, string | null>>({});
@@ -106,7 +109,7 @@ export function CreateView() {
   const [packOpen, setPackOpen] = useState(false);
   const [rest, setRest] = useState<Transplant | null>(null);
   const [showLib, setShowLib] = useState(false);
-  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; cut: string[]; low: string[]; built: Array<{ name: string; sha256: string }>; pack: Pack; template: string } | null>(null);
+  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; cut: string[]; low: string[]; built: Array<{ name: string; sha256: string }>; pack: Pack; template: string; layout: { matchLevel: boolean } } | null>(null);
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const runCheck = async () => {
@@ -201,9 +204,9 @@ export function CreateView() {
     const p = planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack), it = gameItem(p);
     if (!it) return;
     let live = true;
-    void inGameAudio(p, quickPack, it, renderAssignment).then((info) => { if (live && info) setInGame({ key: gameKey(it), info }); }).catch((e) => logger.warn(`Im-Spiel-Vorschau: ${e instanceof Error ? e.message : String(e)}`));
+    void inGameAudio(p, quickPack, it, renderAssignment, layout).then((info) => { if (live && info) setInGame({ key: gameKey(it), info }); }).catch((e) => logger.warn(`Im-Spiel-Vorschau: ${e instanceof Error ? e.message : String(e)}`));
     return () => { live = false; };
-  }, [fire, reload, quickPack, mapRev, step]);
+  }, [fire, reload, quickPack, mapRev, step, matchLvl]);
   const playInGame = async () => {
     if (inGame && engine.playingKey === inGame.key) { engine.stop(); return; }
     engine.unlock();
@@ -215,7 +218,7 @@ export function CreateView() {
         setBusy(null);
         if (!pack) { setNeedBase(true); toast('warning', 'Keine Vorlage gefunden', 'Zieh einmal irgendein Waffen-Soundpack (ZIP oder .rpf) in das Feld – dann geht die Vorschau.'); return; }
         const p = planBuild(project(), WEAPON_PROFILES, loadMapping(), pack), it = gameItem(p);
-        const got = it ? await inGameAudio(p, pack, it, renderAssignment) : null;
+        const got = it ? await inGameAudio(p, pack, it, renderAssignment, layout) : null;
         if (!it || !got) { toast('info', 'Kommt so nicht ins Spiel', 'Dieser Sound wird noch nicht ins Spiel geschrieben (siehe Hinweis darunter).'); return; }
         info = { key: gameKey(it), info: got };
         setInGame(info);
@@ -228,6 +231,19 @@ export function CreateView() {
     }
   };
   const num = (x: number) => x.toFixed(1).replace(".", ",");
+  // "Original": the sound that sits in the template at that place now – to compare with yours
+  const playOriginal = () => {
+    const key = 'ingame:original';
+    if (engine.playingKey === key) { engine.stop(); return; }
+    engine.unlock();
+    if (!quickPack) { toast('info', 'Noch keine Vorlage', 'Hör zuerst „So klingt es im Spiel“ an – dabei wird die Vorlage gesucht.'); return; }
+    const it = gameItem(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack));
+    const t = it?.status === 'ready' ? it.targets[0] : undefined;
+    const st = t && quickPack.groups[t.group].awc.streams.find((x) => x.id === t.stream);
+    if (!st) { toast('info', 'Kein Original zum Vergleich', 'Diesen Sound gibt es in deiner Vorlage nicht.'); return; }
+    engine.setVolume(getState().settings.volume);
+    engine.play(streamToAudio(st), { key });
+  };
   // the archive cannot grow – another soundpack on this PC whose creator used longer sounds gives more room
   const findRoom = async () => {
     try {
@@ -240,7 +256,11 @@ export function CreateView() {
   const inGameHint = (
     <div className="create-ingame">
       <Button size="sm" icon={playing && inGame && playing === inGame.key ? 'stop' : 'gamepad'} disabled={!!busy} onClick={() => void playInGame()}>So klingt es im Spiel</Button>
+      <Button size="sm" variant="ghost" icon={playing === 'ingame:original' ? 'stop' : 'play'} disabled={!!busy || !quickPack} title="Der Sound, der jetzt an dieser Stelle in deiner Vorlage steckt" onClick={playOriginal}>Original</Button>
       <span className="small muted grow">Mono, Lautstärke und Länge genau wie in der Spieldatei.</span>
+      <span className="row small muted" style={{ gap: 6 }} title="Dein Sound bekommt die Lautheit des Sounds, den er in der Vorlage ersetzt. Aus: so laut wie deine Datei (wie bei einem von Hand gebauten Pack).">
+        <Toggle on={matchLvl} onChange={(v) => updateSettings({ matchLevel: v })} label="Lautstärke wie das Original" />Lautstärke wie das Original
+      </span>
       {needBase && !quickPack && <div style={{ width: '100%' }}><div className="qp-label">Einmalig: ein Soundpack als Vorlage</div><BasePicker autoSearch={false} /></div>}
       {inGame && (inGame.info.truncated || inGame.info.lowered || inGame.info.monoLossDb < -6) && (
         <div className="callout small" style={{ width: '100%', marginTop: 8 }}><Icon name="alert" size={16} /><div>
@@ -257,7 +277,7 @@ export function CreateView() {
     if (!done) return;
     setBusy('Bericht wird erstellt…');
     try {
-      const text = await soundReport(done.plan, done.pack, renderAssignment, { name: done.folder, template: done.template, soundName: (id) => entryById(id)?.name ?? id });
+      const text = await soundReport(done.plan, done.pack, renderAssignment, { name: done.folder, template: done.template, soundName: (id) => entryById(id)?.name ?? id, layout: done.layout });
       logger.info(`Bericht „Klingt im Spiel anders“:\n${text}`);
       try { await navigator.clipboard.writeText(text); toast('success', 'Bericht kopiert', 'Füg ihn im Discord beim SP-Tool-Team ein (Strg + V) und schreib dazu, was im Spiel anders klingt.'); }
       catch { toast('warning', 'Kopieren ging nicht', 'Der Bericht steht im Protokoll (Experten-Ansicht: Einfache Ansicht in den Einstellungen ausschalten).'); }
@@ -280,7 +300,7 @@ export function CreateView() {
       if (rest) { const msg = nothingChangesMessage(pl, rest.label); if (msg) throw new Error(msg); }
       if (!pl.ready && !rest) throw new Error(pl.items.some((i) => i.status === 'not-in-base') ? 'In deiner Vorlage fehlen die Dateien für deine Auswahl – nimm ein Soundpack mit WEAPONS_PLAYER.rpf und RESIDENT.rpf.' : `Deine Auswahl wirkt im Spiel noch nicht: SP Tool weiß noch nicht, wo GTA ${blockedLabels(pl).join(', ')} ablegt. Wähl bei der Pistol einen Schuss oder mach den Test im Spiel.`);
       addProject(p, false);
-      const r = await runBuild(pl, pack, renderAssignment, (d, t, l) => { setBusy(d < t ? `Sound ${d + 1} von ${t} · ${l}` : 'WEAPONS_PLAYER.rpf und RESIDENT.rpf werden geschrieben…'); setProg(d < t ? d / t : null); }, { allowEmpty: !!rest, allArchives: true }); // always WEAPONS_PLAYER.rpf + RESIDENT.rpf
+      const r = await runBuild(pl, pack, renderAssignment, (d, t, l) => { setBusy(d < t ? `Sound ${d + 1} von ${t} · ${l}` : 'WEAPONS_PLAYER.rpf und RESIDENT.rpf werden geschrieben…'); setProg(d < t ? d / t : null); }, { allowEmpty: !!rest, allArchives: true, ...layout }); // always WEAPONS_PLAYER.rpf + RESIDENT.rpf
       if (sameAsBase(pack, r.outputs)) throw new Error(`Es hat sich nichts geändert – das Ergebnis wäre genau ${rest ? `„${rest.label}“` : 'deine Vorlage'}. ${blockedLabels(pl).length ? `${blockedLabels(pl).join(', ')} kann SP Tool noch nicht ins Spiel schreiben.` : 'Prüf, ob deine Sounds wirklich anders sind als die im Pack.'}`);
       const missing = ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf'].filter((n) => !r.outputs.some((o) => o.name.toLowerCase() === n.toLowerCase()));
       if (missing.length) { toast('warning', `${missing.join(' und ')} fehlt`, `Deine Vorlage enthält ${missing.join(' und ')} nicht, deshalb ist nur ${r.outputs.map((o) => o.name).join(' und ')} entstanden. Zieh beim nächsten Erstellen ein komplettes Soundpack (mit WEAPONS_PLAYER.rpf und RESIDENT.rpf) als Vorlage rein.`); setNeedBase(true); }
@@ -289,7 +309,7 @@ export function CreateView() {
       logger.info(`Soundpack erstellt: ${p.name} – ${r.replacedStreams} Sounds → ${saved.names.join(', ')}`);
       const built = await Promise.all(r.outputs.map(async (o) => ({ name: o.name, sha256: await sha256Hex(o.bytes) })));
       setCheck(null);
-      setDone({ ...saved, folder: p.name, plan: pl, cut: r.truncated, low: r.lowered, built, pack, template: rest ? `Reload & Rest von „${rest.label}“` : baseInfo()?.label ?? 'unbekannt' });
+      setDone({ ...saved, folder: p.name, plan: pl, cut: r.truncated, low: r.lowered, built, pack, layout, template: rest ? `Reload & Rest von „${rest.label}“` : baseInfo()?.label ?? 'unbekannt' });
     } catch (e) {
       toast('error', 'Das hat nicht geklappt', e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); setProg(null); }
@@ -399,6 +419,7 @@ export function CreateView() {
           <DoneMark />
           <h2>{done.folder} ist fertig!</h2>
           <p className="muted"><b>{done.zip}</b> liegt {done.dir ? <>in <b>Downloads › SP Tool</b></> : 'in deinem Download-Ordner'} ({done.names.join(' + ')}). Nichts wurde automatisch installiert.</p>
+          <p className="small muted">Vorlage: <b>{done.template}</b> – Waffen und Sounds, die du nicht geändert hast, klingen wie in diesem Soundpack.</p>
           <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="info" size={16} /><div>
             <b>So kommt es ins Spiel:</b>
             <ol style={{ margin: '4px 0 0', paddingLeft: 18 }}>

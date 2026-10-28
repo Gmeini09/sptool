@@ -115,14 +115,37 @@ function fadeTo(a: AudioData, keep: number): AudioData {
 }
 const seconds = (s: AwcStream) => s.format.samples / s.format.sampleRate;
 
+/** How loud a shot or click is heard: RMS of its loudest 50 ms. */
+function punch(c: Float32Array, rate: number): number {
+  const w = Math.max(1, Math.round(rate * 0.05));
+  let best = 0, sum = 0;
+  for (let i = 0; i < c.length; i++) { sum += c[i] * c[i]; if (i >= w) sum -= c[i - w] * c[i - w]; if (i >= w - 1) best = Math.max(best, sum); }
+  if (c.length < w) best = sum;
+  return Math.sqrt(Math.max(0, best) / w);
+}
+
+/** "Lautstärke wie das Original": the sound gets the loudness of the template sound it replaces (never above full scale). */
+function matchLevel(o: AwcStream, a: AudioData): AudioData {
+  const ref = punch(streamToAudio(o).channels[0], o.format.sampleRate);
+  const m = monoMix(a).mono, cur = punch(m, a.sampleRate);
+  if (ref < 1e-6 || cur < 1e-6) return a;
+  let peak = 0;
+  for (let i = 0; i < m.length; i++) peak = Math.max(peak, Math.abs(m[i]));
+  const g = Math.min(ref / cur, 1 / Math.max(peak, 1e-9));
+  return { sampleRate: a.sampleRate, channels: a.channels.map((c) => c.map((x) => x * g)) };
+}
+
+export interface LayoutOptions { matchLevel?: boolean }
+
 /**
  * Lays out one container: sounds that fit their stream are written exactly as before (same size); a muted stream
  * shrinks; a sound longer than its stream gets the freed bytes – at a lower sample rate if needed (not below
  * 11 kHz) – and only what still does not fit is cut off.
  */
-function layoutGroup(pack: Pack, gi: number, want: Map<number, AudioData | null>, shots: Set<number> = new Set()): { streams: Map<number, AwcStream>; truncated: Set<number>; padded: Set<number>; lowered: Set<number> } {
+function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | null>, shots: Set<number> = new Set(), lo: LayoutOptions = {}): { streams: Map<number, AwcStream>; truncated: Set<number>; padded: Set<number>; lowered: Set<number> } {
   const g = pack.groups[gi];
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
+  const want = lo.matchLevel ? new Map([...wanted].map(([id, a]) => [id, a && matchLevel(orig(id), a)] as const)) : wanted;
   const truncated = new Set<number>(), padded = new Set<number>(), lowered = new Set<number>();
   const size = (m: Map<number, AwcStream>) => writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => m.get(s.id) ?? s) }).length;
   // 0 · every sound at its own rate and full length – exactly what a pack made by hand holds – when the container has room
@@ -173,7 +196,7 @@ function layoutGroup(pack: Pack, gi: number, want: Map<number, AudioData | null>
  * Renders every ready slot once and writes it into all of its target streams.
  * `render` turns a slot assignment into audio (renderAssignment in the app; a stub in tests).
  */
-export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssignment) => Promise<AudioData>, onProgress?: (done: number, total: number, label: string) => void, opts: { allowEmpty?: boolean; allArchives?: boolean } = {}): Promise<BuildResult> {
+export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssignment) => Promise<AudioData>, onProgress?: (done: number, total: number, label: string) => void, opts: { allowEmpty?: boolean; allArchives?: boolean } & LayoutOptions = {}): Promise<BuildResult> {
   const ready = plan.items.filter((i) => i.status === 'ready');
   if (!ready.length && !opts.allowEmpty) throw new Error('Nichts zu bauen: Kein befüllter Slot ist einem Sound im Basis-Pack zugeordnet.');
   const want = new Map<number, Map<number, AudioData | null>>();
@@ -196,7 +219,7 @@ export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssi
   // (inGameAudio below lays out one group the same way – keep both in step)
   const truncated: string[] = [], padded: string[] = [], lowered: string[] = [];
   for (const [gi, w] of want) {
-    const r = layoutGroup(pack, gi, w, shotStreams.get(gi));
+    const r = layoutGroup(pack, gi, w, shotStreams.get(gi), opts);
     byGroup.set(gi, r.streams);
     for (const id of r.truncated) truncated.push(labelOf.get(`${gi}:${id}`)!);
     for (const id of r.padded) padded.push(labelOf.get(`${gi}:${id}`)!);
@@ -224,7 +247,7 @@ export interface InGameSound {
  * plan that share that container take their share of the free bytes) and decodes the stream again.
  * null when the slot is not written into the game (unmapped, not in the base, muted).
  */
-export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, render: (a: SlotAssignment) => Promise<AudioData>): Promise<InGameSound | null> {
+export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, render: (a: SlotAssignment) => Promise<AudioData>, lo: LayoutOptions = {}): Promise<InGameSound | null> {
   if (item.status !== 'ready' || item.assignment.entryId === SILENCE || !item.targets.length) return null;
   const t = item.targets[0];
   const want = new Map<number, AudioData | null>(), shots = new Set<number>();
@@ -238,7 +261,7 @@ export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, r
     for (const x of here) { want.set(x.stream, audio); if (/fire$/.test(it.slot)) shots.add(x.stream); }
   }
   if (!source) return null;
-  const r = layoutGroup(pack, t.group, want, shots);
+  const r = layoutGroup(pack, t.group, want, shots, lo);
   const audio = streamToAudio(r.streams.get(t.stream)!);
   const n = source.channels[0].length, monoLossDb = monoMix(source).lossDb;
   return {

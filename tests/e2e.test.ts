@@ -168,3 +168,21 @@ test('"Klingt im Spiel anders?" report names the template and marks a cut sound'
   assert.match(text, /Pistol · .*Mein Schuss/);
   assert.match(text, /GEKÜRZT/);
 });
+
+test('"Lautstärke wie das Original": a quiet sound gets the loudness of the template sound, without clipping', async () => {
+  const { inGameAudio } = await import('../src/projects/build');
+  const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 0.6 }));
+  let p = newProject('Pegel', 'me');
+  p = assign(p, 'pistol', 'fire', { entryId: 'quiet' });
+  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  const it = plan.items.find((i) => i.slot === 'fire' && i.status === 'ready')!;
+  const quiet = tone(0.4); const x = quiet.channels[0]; for (let i = 0; i < x.length; i++) x[i] *= 0.1; // peak 0.05
+  const rms = (c: Float32Array) => Math.sqrt(c.reduce((s, v) => s + v * v, 0) / c.length);
+  const peakOf = (c: Float32Array) => c.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  const kept = await inGameAudio(plan, pack, it, async () => quiet);
+  const matched = await inGameAudio(plan, pack, it, async () => quiet, { matchLevel: true });
+  assert.ok(Math.abs(peakOf(kept!.audio.channels[0]) - 0.05) < 0.005, 'off: level of the file');
+  const m = matched!.audio.channels[0];
+  assert.ok(rms(m) > rms(kept!.audio.channels[0]) * 5, 'on: clearly louder');
+  assert.ok(peakOf(m) <= 1.0001, 'never above full scale');
+});

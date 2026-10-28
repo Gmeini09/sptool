@@ -18,6 +18,10 @@ Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version
 - Stereo-Sounds, die sich in Mono auslöschen würden, kommen jetzt trotzdem hörbar ins Spiel (SP Tool nimmt dann den lauteren Kanal)
 - Neuer Knopf „Klingt im Spiel anders?“ nach dem Erstellen: kopiert einen Bericht (Vorlage, Länge und Rate vorher/im Spiel, gekürzt …) zum Weiterschicken
 - Absturz-Erkennung in der Windows-App repariert: „Soundpack wiederhergestellt“ kommt nur noch nach einem echten Absturz, nicht nach normalem Schließen oder Updates
+- „Original“ neben „So klingt es im Spiel“: spielt zum Vergleich den Sound, der jetzt an dieser Stelle in deiner Vorlage steckt
+- Schalter „Lautstärke wie das Original“: dein Sound bekommt die Lautheit des Sounds, den er ersetzt (aus = so laut wie deine Datei)
+- Fertig-Bildschirm zeigt, aus welcher Vorlage die übrigen Sounds stammen
+- INSTALLER-BAUEN.cmd und die GitHub-Release-Pipeline bauen jetzt die Windows-App (Go) statt der alten Tauri-Version
 - Weniger Meldungen: Die Warnung „SP Tool wurde beim letzten Mal nicht richtig beendet“ kam fälschlich nach fast jedem Schließen und ist weg – ebenso überflüssige Bestätigungen (Reload übernommen, Slot gesetzt, Soundpack erstellt, „Danke – das hilft der Erkennung“ …)
 
 ## 1.10.11 – 25.10.2026
