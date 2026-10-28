@@ -69,14 +69,16 @@ export function App() {
   useEffect(() => {
     void runDetection();
     startSessionGuard();
-    if (getState().recovered) {
-      // no message: closing the Windows window ends the app without "pagehide", so this fired after nearly every start
-      setState({ recovered: false });
-    }
     startCloudAutoSync();
     const t = setInterval(snapshotTick, 60_000);
     return () => clearInterval(t);
   }, []);
+  const recovered = useApp((s) => s.recovered);
+  useEffect(() => {
+    if (!recovered) return;
+    toast('info', 'Soundpack wiederhergestellt', 'SP Tool wurde beim letzten Mal unerwartet beendet – dein Soundpack kommt aus der automatischen Speicherung. Ältere Stände findest du in seinem Versionsverlauf.');
+    setState({ recovered: false });
+  }, [recovered]);
 
   const acc = useAccount((a) => a);
   // Everyone with a license: right after login / start, a version the admin pushed is offered in a window (the user

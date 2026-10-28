@@ -6,6 +6,7 @@ import type { Project } from '../projects/project';
 import type { DetectState, FiveMStatus, GtaInstall } from '../services/system';
 import { loadJSON, saveJSON } from '../services/storage';
 import { markRemovedLocally } from '../projects/cloudMeta';
+import { nativeInfo } from '../services/native';
 
 export type Route =
   | 'home' | 'create' | 'projects' | 'soundpack' | 'weapons' | 'library' | 'editor' | 'generator' | 'mixer'
@@ -237,9 +238,16 @@ export function openProject(id: string) {
 }
 
 // Crash recovery (spec §96): a marker is set while the app runs and cleared on a clean exit.
-// If it is still set on the next start, the previous session ended unexpectedly.
+// If it is still set on the next start, the previous session ended unexpectedly. In the Windows app the window is
+// closed without "pagehide", so the Go side keeps that marker (lastRunCrashed); the browser uses localStorage.
 const SESSION_KEY = 'sptool:session-open';
 export function startSessionGuard() {
+  void nativeInfo().catch(() => null).then((n) => {
+    if (!n) return browserSessionGuard();
+    if (n.lastRunCrashed && getState().currentProjectId) setState({ recovered: true });
+  });
+}
+function browserSessionGuard() {
   try {
     const crashed = localStorage.getItem(SESSION_KEY) === '1';
     localStorage.setItem(SESSION_KEY, '1');

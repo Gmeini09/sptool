@@ -15,6 +15,9 @@ Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version
 - Hinweis beim Nachladen: Bei „In Teile schneiden“ wirkt im Spiel bisher nur „Magazin raus“
 - Sounds klingen im Spiel wie bei einem von Hand gebauten Soundpack: Lautstärke bleibt wie in deiner Datei (kein Hochziehen auf volle Lautstärke mehr), und wenn in der Vorlage Platz ist, kommt der Sound mit seiner eigenen Abtastrate und Länge ins Spiel statt auf die Rate der Vorlage umgerechnet
 - Vorlage mit Platz: Beim ersten Einrichten nimmt SP Tool unter deinen Soundpacks automatisch das, in dem lange Schüsse und Reloads am wenigsten gekürzt werden. Wird ein Sound trotzdem gekürzt, sucht „Vorlage mit mehr Platz suchen“ auf deinem PC nach einer besseren
+- Stereo-Sounds, die sich in Mono auslöschen würden, kommen jetzt trotzdem hörbar ins Spiel (SP Tool nimmt dann den lauteren Kanal)
+- Neuer Knopf „Klingt im Spiel anders?“ nach dem Erstellen: kopiert einen Bericht (Vorlage, Länge und Rate vorher/im Spiel, gekürzt …) zum Weiterschicken
+- Absturz-Erkennung in der Windows-App repariert: „Soundpack wiederhergestellt“ kommt nur noch nach einem echten Absturz, nicht nach normalem Schließen oder Updates
 - Weniger Meldungen: Die Warnung „SP Tool wurde beim letzten Mal nicht richtig beendet“ kam fälschlich nach fast jedem Schließen und ist weg – ebenso überflüssige Bestätigungen (Reload übernommen, Slot gesetzt, Soundpack erstellt, „Danke – das hilft der Erkennung“ …)
 
 ## 1.10.11 – 25.10.2026

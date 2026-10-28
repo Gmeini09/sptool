@@ -206,11 +206,24 @@ export function replaceStreamAudio(orig: AwcStream, audio: AudioData, opts: { ke
   };
 }
 
-function mixToMono(a: AudioData): Float32Array {
-  if (a.channels.length === 1) return a.channels[0];
-  const n = a.channels[0].length, out = new Float32Array(n);
-  for (const ch of a.channels) for (let i = 0; i < n; i++) out[i] += ch[i] / a.channels.length;
-  return out;
+const mixToMono = (a: AudioData) => monoMix(a).mono;
+
+/**
+ * Mono for the game (GTA plays these streams in mono): the average of the channels – unless they cancel each other
+ * out (more than 6 dB lost, e.g. a phase-inverted channel), then the loudest channel alone.
+ * lossDb: level the written mono loses against the stereo sound (≤ 0).
+ */
+export function monoMix(a: AudioData): { mono: Float32Array; lossDb: number } {
+  if (a.channels.length === 1) return { mono: a.channels[0], lossDb: 0 };
+  const ms = (c: Float32Array) => { let s = 0; for (let i = 0; i < c.length; i++) s += c[i] * c[i]; return s / Math.max(1, c.length); };
+  const n = a.channels[0].length, avg = new Float32Array(n);
+  for (const ch of a.channels) for (let i = 0; i < n; i++) avg[i] += ch[i] / a.channels.length;
+  const stereo = a.channels.reduce((s, c) => s + ms(c), 0) / a.channels.length;
+  const loss = (x: Float32Array) => (stereo > 1e-12 ? Math.min(0, 10 * Math.log10(Math.max(1e-12, ms(x)) / stereo)) : 0);
+  const l = loss(avg);
+  if (l >= -6) return { mono: avg, lossDb: l };
+  const loudest = a.channels.reduce((b, c) => (ms(c) > ms(b) ? c : b));
+  return { mono: loudest, lossDb: loss(loudest) };
 }
 
 /** Windowed-sinc resampler (16 taps) – good enough for one-shot SFX, no external deps. */

@@ -149,6 +149,7 @@ func install(self string) {
 	// Only OTHER instances – the downloaded file has the same name as the installed one.
 	_ = hidden("taskkill", "/F", "/IM", exeName, "/FI", fmt.Sprintf("PID ne %d", os.Getpid())).Run()
 	time.Sleep(400 * time.Millisecond)
+	_ = os.Remove(sessionMarker()) // closed on purpose, not a crash
 	if err := os.MkdirAll(installDir, 0o755); err != nil {
 		fatal("Installation fehlgeschlagen: %v", err)
 	}
@@ -289,6 +290,12 @@ func openInBrowser(u string) {
 	pShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(target)), 0, 0, 1)
 }
 
+// Crash detection: a marker exists while the window is open and is removed on a clean close – also right before an
+// update or a new install replaces this instance. Still there on the next start → the last session ended unexpectedly.
+var lastRunCrashed bool
+
+func sessionMarker() string { return filepath.Join(dataDir, "session-open") }
+
 func run() {
 	if !singleInstance() {
 		focusExisting()
@@ -332,10 +339,14 @@ func run() {
 		return
 	}
 	defer w.Destroy()
+	_, err := os.Stat(sessionMarker())
+	lastRunCrashed = err == nil
+	_ = os.WriteFile(sessionMarker(), nil, 0o644)
 	styleWindow(uintptr(w.Window()))
 	w.SetSize(1100, 700, webview2.HintMin)
 	w.Navigate(url)
 	w.Run() // returns when the window is closed
+	_ = os.Remove(sessionMarker())
 	log.Println("window closed")
 }
 
@@ -400,7 +411,7 @@ func native(w http.ResponseWriter, r *http.Request) {
 	case "/native/info":
 		id, src := machineID()
 		host, _ := os.Hostname()
-		writeJSON(w, map[string]any{"version": version, "platform": "windows", "machineId": id, "machineIdSource": src, "hostName": host, "dataDir": dataDir})
+		writeJSON(w, map[string]any{"version": version, "platform": "windows", "machineId": id, "machineIdSource": src, "hostName": host, "dataDir": dataDir, "lastRunCrashed": lastRunCrashed})
 	case "/native/detect/fivem":
 		writeJSON(w, detectFiveM(r.URL.Query().Get("customRoot")))
 	case "/native/open":

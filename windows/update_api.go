@@ -52,6 +52,7 @@ func updateAPI(w http.ResponseWriter, r *http.Request) bool {
 	}
 	go func() {
 		time.Sleep(600 * time.Millisecond) // let the answer reach the window first
+		_ = os.Remove(sessionMarker())      // the update closes this instance on purpose
 		if err := exec.Command(exe).Start(); err != nil {
 			log.Println("update start failed:", err)
 		}

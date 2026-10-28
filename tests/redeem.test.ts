@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// @ts-expect-error – plain JS server module without types
 import { openDb } from '../server/db.mjs';
+// @ts-expect-error – plain JS server module without types
 import { createLicenseService } from '../server/service.mjs';
 
 const DAY = 86_400_000;

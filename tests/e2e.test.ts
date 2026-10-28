@@ -124,10 +124,12 @@ test('"So klingt es im Spiel" plays exactly what the build writes – also when 
     if (it.slot === 'mag_out') { assert.ok(g.truncated && g.gameSeconds < g.sourceSeconds, 'long reload is reported as cut'); }
     else assert.ok(!g.truncated);
   }
-  // stereo that cancels in mono is reported
+  // stereo that cancels in mono: one channel is written instead of silence
   const anti = { sampleRate: 44100, channels: [tone(0.25).channels[0], tone(0.25).channels[0].map((x) => -x)] };
   const g = await inGameAudio(plan, pack, plan.items.find((i) => i.slot === 'fire')!, async (a) => (a.entryId === 'short' ? anti : sounds.long));
-  assert.ok(g!.monoLossDb < -40);
+  let peak = 0; for (const v of g!.audio.channels[0]) peak = Math.max(peak, Math.abs(v));
+  assert.ok(peak > 0.4, `audible in the game, peak ${peak}`);
+  assert.ok(g!.monoLossDb > -1);
 });
 
 test('a sound that fits is written like a pack made by hand: own rate, own length, own level', async () => {
@@ -153,4 +155,16 @@ test('soundRoom: a template with longer shot slots has more room for own sounds'
   const tight = await soundRoom(openPack(synthPack({ f01Max: 120, shotSeconds: 0.3 })));
   const roomy = await soundRoom(openPack(synthPack({ f01Max: 120, shotSeconds: 1.5 })));
   assert.ok(roomy > tight, `${roomy} > ${tight}`);
+});
+
+test('"Klingt im Spiel anders?" report names the template and marks a cut sound', async () => {
+  const { soundReport } = await import('../src/projects/report');
+  const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 0.3 }));
+  let p = newProject('Bericht', 'me');
+  p = assign(p, 'pistol', 'fire', { entryId: 'long' });
+  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  const text = await soundReport(plan, pack, async () => tone(2), { name: 'Bericht', template: 'Testvorlage', soundName: () => 'Mein Schuss' });
+  assert.match(text, /Vorlage: Testvorlage/);
+  assert.match(text, /Pistol · .*Mein Schuss/);
+  assert.match(text, /GEKÜRZT/);
 });

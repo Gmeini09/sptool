@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon, type IconName } from './Icon';
 
 export function Button(props: {
-  children?: ReactNode; onClick?: () => void; variant?: 'primary' | 'ghost' | 'danger'; size?: 'sm' | 'lg';
+  children?: ReactNode; onClick?: (e: React.MouseEvent) => void; variant?: 'primary' | 'ghost' | 'danger'; size?: 'sm' | 'lg';
   icon?: IconName; disabled?: boolean; title?: string; type?: 'button' | 'submit'; className?: string;
 }) {
   const cls = ['btn', props.variant, props.size, props.className].filter(Boolean).join(' ');

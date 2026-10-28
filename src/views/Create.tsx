@@ -13,14 +13,15 @@ import { Button, DoneMark, Progress } from '../components/ui';
 import type { AudioData } from '../dsp/types';
 import { classifySound } from '../dsp/classify';
 import { loadMapping, MAPPING_EVENT } from '../formats/mapping';
-import { allEntries } from '../library/assets';
+import { allEntries, entryById } from '../library/assets';
 import { featuredFirst } from '../library/turbo';
 import { freeReloads } from '../library/freeReloads';
 import { AUDIO_ACCEPT, AUDIO_EXT, addAudioEntry, importAudioFiles, importSorted, importWholeReload, reloadPartsOf, type SortedFile } from '../library/importAudio';
 import { reportDetection } from '../services/detectionFeedback';
 import type { LibraryEntry, Style, WeaponId } from '../models/types';
 import { renderAssignment } from '../projects/actions';
-import { ensureBase, moreRoomBase } from '../projects/basePack';
+import { baseInfo, ensureBase, moreRoomBase } from '../projects/basePack';
+import { soundReport } from '../projects/report';
 import { blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { openPack, type Pack } from '../formats/pack';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
@@ -105,7 +106,7 @@ export function CreateView() {
   const [packOpen, setPackOpen] = useState(false);
   const [rest, setRest] = useState<Transplant | null>(null);
   const [showLib, setShowLib] = useState(false);
-  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; cut: string[]; low: string[]; built: Array<{ name: string; sha256: string }> } | null>(null);
+  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; cut: string[]; low: string[]; built: Array<{ name: string; sha256: string }>; pack: Pack; template: string } | null>(null);
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const runCheck = async () => {
@@ -252,6 +253,18 @@ export function CreateView() {
     </div>
   );
 
+  const copyReport = async () => {
+    if (!done) return;
+    setBusy('Bericht wird erstellt…');
+    try {
+      const text = await soundReport(done.plan, done.pack, renderAssignment, { name: done.folder, template: done.template, soundName: (id) => entryById(id)?.name ?? id });
+      logger.info(`Bericht „Klingt im Spiel anders“:\n${text}`);
+      try { await navigator.clipboard.writeText(text); toast('success', 'Bericht kopiert', 'Füg ihn im Discord beim SP-Tool-Team ein (Strg + V) und schreib dazu, was im Spiel anders klingt.'); }
+      catch { toast('warning', 'Kopieren ging nicht', 'Der Bericht steht im Protokoll (Experten-Ansicht: Einfache Ansicht in den Einstellungen ausschalten).'); }
+    } catch (e) { toast('error', 'Bericht ging nicht', e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  };
+
   const create = async () => {
     setBusy('Vorlage wird vorbereitet…'); setProg(null);
     try {
@@ -276,7 +289,7 @@ export function CreateView() {
       logger.info(`Soundpack erstellt: ${p.name} – ${r.replacedStreams} Sounds → ${saved.names.join(', ')}`);
       const built = await Promise.all(r.outputs.map(async (o) => ({ name: o.name, sha256: await sha256Hex(o.bytes) })));
       setCheck(null);
-      setDone({ ...saved, folder: p.name, plan: pl, cut: r.truncated, low: r.lowered, built });
+      setDone({ ...saved, folder: p.name, plan: pl, cut: r.truncated, low: r.lowered, built, pack, template: rest ? `Reload & Rest von „${rest.label}“` : baseInfo()?.label ?? 'unbekannt' });
     } catch (e) {
       toast('error', 'Das hat nicht geklappt', e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); setProg(null); }
@@ -415,6 +428,7 @@ export function CreateView() {
             {done.dir && <Button variant="primary" icon="folder" onClick={() => void showDownloads()}>ZIP zeigen</Button>}
             {done.dir && <Button icon="folder" onClick={() => void showSfxFolder().then((ok) => { if (!ok) toast('error', 'sfx-Ordner nicht gefunden', 'Trag den GTA-V-Ordner unter Einstellungen ein.'); })}>sfx-Ordner öffnen</Button>}
             {done.dir && <Button icon="search" disabled={checking} onClick={() => void runCheck()}>{checking ? 'Prüft…' : 'Prüfen'}</Button>}
+            <Button icon="copy" disabled={!!busy} title="Kopiert einen Bericht, was genau ins Spiel geschrieben wurde – zum Weiterschicken ans SP-Tool-Team" onClick={() => void copyReport()}>Klingt im Spiel anders?</Button>
             <Button icon="plus" onClick={() => { setDone(null); setCheck(null); setStep(0); }}>Noch eins erstellen</Button>
           </div>
         </div>

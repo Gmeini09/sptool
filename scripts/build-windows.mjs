@@ -12,6 +12,8 @@ const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 const v4 = `${pkg.version}.0`;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'inherit', ...opts });
 
+// type errors stop the release build before anything is written
+run(process.execPath, [resolve(root, 'node_modules/typescript/bin/tsc'), '--noEmit'], { cwd: root });
 run(process.execPath, [resolve(root, 'scripts/build.mjs')], { cwd: root });
 rmSync(resolve(win, 'web'), { recursive: true, force: true });
 cpSync(resolve(root, 'dist'), resolve(win, 'web'), { recursive: true });
@@ -57,6 +59,8 @@ writeFileSync(resolve(folder, 'LIES MICH.txt'), [
   '',
 ].join('\r\n'));
 rmSync(resolve(root, 'release', ZIP_NAME), { force: true });
-run('zip', ['-r', '-X', '-9', resolve(root, 'release', ZIP_NAME), 'Turbo Designs SP Tool'], { cwd: stage });
+// Windows has no zip command – PowerShell packs the same folder
+if (process.platform === 'win32') run('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path 'Turbo Designs SP Tool' -DestinationPath '${resolve(root, 'release', ZIP_NAME)}' -Force`], { cwd: stage });
+else run('zip', ['-r', '-X', '-9', resolve(root, 'release', ZIP_NAME), 'Turbo Designs SP Tool'], { cwd: stage });
 rmSync(stage, { recursive: true, force: true });
 console.log(`✓ release/${ZIP_NAME}`);

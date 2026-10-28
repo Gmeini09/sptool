@@ -1,6 +1,6 @@
 // Bridge to the native Windows app (SPTool.exe). The exe serves this app on localhost and answers
 // /native/* (same-origin only). In a plain browser or Tauri these calls simply report "not native".
-export interface NativeInfo { version: string; platform: string; machineId: string; machineIdSource: string; hostName: string; dataDir: string }
+export interface NativeInfo { version: string; platform: string; machineId: string; machineIdSource: string; hostName: string; dataDir: string; /** the window was not closed normally last time (older builds: missing) */ lastRunCrashed?: boolean }
 
 let infoP: Promise<NativeInfo | null> | null = null;
 

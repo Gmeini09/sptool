@@ -43,7 +43,7 @@ export async function importWavFiles(files: File[]): Promise<string[]> {
     if (!AUDIO_EXT.test(f.name) && !f.type.startsWith('audio/')) { toast('warning', `${f.name} übersprungen`, 'Das ist keine Audiodatei (MP3, WAV, OGG, M4A, FLAC …).'); continue; }
     if (f.size > MAX_IMPORT_BYTES) { toast('warning', `${f.name} übersprungen`, 'Dateien über 80 MB werden nicht unterstützt.'); continue; }
     try {
-      let bytes = new Uint8Array(await f.arrayBuffer());
+      let bytes: Uint8Array = new Uint8Array(await f.arrayBuffer());
       // MP3, OGG, M4A, FLAC … → WAV (the library stores WAV)
       if (!/\.wave?$/i.test(f.name)) bytes = await audioWorker.encode(await decodeAny(bytes).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); }), 16);
       const r = await audioWorker.decode(bytes); // validates the file before we store anything

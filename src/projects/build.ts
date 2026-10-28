@@ -6,7 +6,7 @@
 // an old copy. Container sizes never change (see rpf.ts), so the encrypted table of contents stays valid.
 // Inside a container the streams can be laid out anew: a muted stream (SILENCE) shrinks to a few milliseconds and
 // its bytes let a longer sound – a whole reload – keep its full length (creator packs do the same).
-import { fitStreamAudio, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
+import { fitStreamAudio, monoMix, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
 import { exportPack, type Pack } from '../formats/pack';
 import { matchCatalog, streamsFor, type Mapping } from '../formats/mapping';
 import type { AudioData } from '../dsp/types';
@@ -240,11 +240,7 @@ export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, r
   if (!source) return null;
   const r = layoutGroup(pack, t.group, want, shots);
   const audio = streamToAudio(r.streams.get(t.stream)!);
-  const rms = (c: Float32Array) => { let s = 0; for (let i = 0; i < c.length; i++) s += c[i] * c[i]; return s / Math.max(1, c.length); };
-  const n = source.channels[0].length, mono = new Float32Array(n);
-  for (const c of source.channels) for (let i = 0; i < n; i++) mono[i] += c[i] / source.channels.length;
-  const stereo = source.channels.reduce((s, c) => s + rms(c), 0) / source.channels.length;
-  const monoLossDb = stereo > 1e-12 ? Math.min(0, 10 * Math.log10(Math.max(1e-12, rms(mono)) / stereo)) : 0;
+  const n = source.channels[0].length, monoLossDb = monoMix(source).lossDb;
   return {
     audio, truncated: r.truncated.has(t.stream), lowered: r.lowered.has(t.stream),
     sourceSeconds: n / source.sampleRate, gameSeconds: audio.channels[0].length / audio.sampleRate, monoLossDb,

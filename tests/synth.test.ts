@@ -76,7 +76,7 @@ test('1.7.4: the city echo of the street shot comes after the shot', () => {
 
 test('edits saved before 1.7.4 (without the new stages) still render', () => {
   const ref = synthesize(fires[0].synth!);
-  const old = freshEdit() as Record<string, unknown>;
+  const old = freshEdit() as unknown as Record<string, unknown>;
   delete old.tone; delete old.exciter; delete old.thump; delete old.slap;
   const out = renderEdit(ref, mergeEdit(old as never, { exciter: { enabled: true } } as never));
   assert.ok(out.channels[0].length > 0);
