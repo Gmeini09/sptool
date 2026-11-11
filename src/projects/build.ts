@@ -124,9 +124,17 @@ function punch(c: Float32Array, rate: number): number {
   return Math.sqrt(Math.max(0, best) / w);
 }
 
-/** "Lautstärke wie das Original": the sound gets the loudness of the template sound it replaces (never above full scale). */
+/**
+ * "Lautstärke wie das Original": the sound gets the loudness of the template sound it replaces (never above full scale).
+ * Many creators mute the reload parts they do not use (peak around −38 dB) – such a muted original is no reference,
+ * the sound then keeps its own level instead of becoming inaudible.
+ */
 function matchLevel(o: AwcStream, a: AudioData): AudioData {
-  const ref = punch(streamToAudio(o).channels[0], o.format.sampleRate);
+  const og = streamToAudio(o).channels[0];
+  let ogPeak = 0;
+  for (let i = 0; i < og.length; i++) ogPeak = Math.max(ogPeak, Math.abs(og[i]));
+  if (ogPeak < 0.1) return a; // below −20 dBFS: muted on purpose
+  const ref = punch(og, o.format.sampleRate);
   const m = monoMix(a).mono, cur = punch(m, a.sampleRate);
   if (ref < 1e-6 || cur < 1e-6) return a;
   let peak = 0;

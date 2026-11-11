@@ -186,3 +186,19 @@ test('"Lautstärke wie das Original": a quiet sound gets the loudness of the tem
   assert.ok(rms(m) > rms(kept!.audio.channels[0]) * 5, 'on: clearly louder');
   assert.ok(peakOf(m) <= 1.0001, 'never above full scale');
 });
+
+test('"Lautstärke wie das Original" never matches to a muted original (creators mute unused reload parts)', async () => {
+  const { inGameAudio } = await import('../src/projects/build');
+  const base = openPack(synthPack({ f01Max: 120, shotSeconds: 0.6 }));
+  let p = newProject('Stumm', 'me');
+  p = assign(p, 'pistol', 'fire', { entryId: 'x' });
+  // a template whose creator put a near-silent sound there (−40 dB)
+  const muted = tone(0.4); const mx = muted.channels[0]; for (let i = 0; i < mx.length; i++) mx[i] *= 0.02;
+  const built = await runBuild(planBuild(p, WEAPON_PROFILES, shipped, base), base, async () => muted, undefined, { allArchives: true });
+  const pack = openPack(built.outputs.map((o) => ({ name: o.name, bytes: o.bytes })));
+  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  const it = plan.items.find((i) => i.slot === 'fire' && i.status === 'ready')!;
+  const g = await inGameAudio(plan, pack, it, async () => tone(0.4), { matchLevel: true });
+  const peak = g!.audio.channels[0].reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  assert.ok(peak > 0.4, `keeps its own level, got ${peak}`);
+});
