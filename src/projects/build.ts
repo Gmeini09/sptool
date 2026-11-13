@@ -134,7 +134,7 @@ const MIN_GAME_RATE = 8000, MAX_GAME_RATE = 65535; // what an AWC stream can hol
 /** Sounds that do not fit the template 1 : 1 – SP Tool never cuts or squeezes them by itself. */
 export class TooLongError extends Error {
   constructor(public parts: Array<{ labels: string[]; overSeconds: number }>) {
-    super(`Passt nicht in die Vorlage – SP Tool kürzt und verändert deine Sounds nicht: ${parts.map((x) => `${x.labels.join(' + ')} ${x.labels.length > 1 ? 'sind zusammen' : 'ist'} ${x.overSeconds.toFixed(2).replace('.', ',')} s zu lang`).join('; ')}. Kürze den Sound selbst (Editor) oder nimm eine Vorlage mit mehr Platz.`);
+    super(`Passt nicht in die Vorlage – SP Tool kürzt und verändert deine Sounds nicht: ${parts.map((x) => `${x.labels.join(' + ')} ${x.labels.length > 1 ? 'sind zusammen' : 'ist'} ${x.overSeconds.toFixed(2).replace('.', ',')} s zu lang`).join('; ')}. Kürze den Sound selbst mit „Bearbeiten“.`);
     this.name = 'TooLongError';
   }
 }

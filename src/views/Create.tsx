@@ -20,7 +20,7 @@ import { AUDIO_ACCEPT, AUDIO_EXT, addAudioEntry, importAudioFiles, importSorted,
 import { reportDetection } from '../services/detectionFeedback';
 import type { LibraryEntry, Style, WeaponId } from '../models/types';
 import { renderAssignment } from '../projects/actions';
-import { baseInfo, ensureBase, moreRoomBase } from '../projects/basePack';
+import { baseInfo, ensureBase, moreRoomBase, ORIGINAL_LABEL } from '../projects/basePack';
 import { soundReport } from '../projects/report';
 import { SAME_SOUND, blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { SoundEditorOverlay } from './Editor';
@@ -275,8 +275,8 @@ export function CreateView() {
       {needBase && !quickPack && <div style={{ width: '100%' }}><div className="qp-label">Einmalig: ein Soundpack als Vorlage</div><BasePicker autoSearch={false} /></div>}
       {inGame && (!inGame.info.fits || inGame.info.monoLossDb < -6) && (
         <div className="callout small" style={{ width: '100%', marginTop: 8 }}><Icon name="alert" size={16} /><div>
-          {!inGame.info.fits && <div><b>Passt nicht in die Vorlage: {num(inGame.info.overSeconds)} s zu lang</b> (dein Sound: {num(inGame.info.sourceSeconds)} s). SP Tool kürzt nichts selbst – kürze den Sound im Editor oder nimm eine Vorlage mit mehr Platz.</div>}
-          {!inGame.info.fits && native && !rest && <div style={{ marginTop: 6 }}><Button size="sm" icon="search" disabled={!!busy} onClick={() => void findRoom()}>{busy ?? 'Vorlage mit mehr Platz suchen'}</Button></div>}
+          {!inGame.info.fits && <div><b>Passt nicht in die Vorlage: {num(inGame.info.overSeconds)} s zu lang</b> (dein Sound: {num(inGame.info.sourceSeconds)} s). SP Tool kürzt nichts selbst – kürze ihn mit „Bearbeiten“{baseInfo()?.label === ORIGINAL_LABEL ? ` auf höchstens ${num(Math.max(0, inGame.info.sourceSeconds - inGame.info.overSeconds))} s` : ' oder nimm eine Vorlage mit mehr Platz'}.</div>}
+          {!inGame.info.fits && native && !rest && baseInfo()?.label !== ORIGINAL_LABEL && <div style={{ marginTop: 6 }}><Button size="sm" icon="search" disabled={!!busy} onClick={() => void findRoom()}>{busy ?? 'Vorlage mit mehr Platz suchen'}</Button></div>}
           {inGame.info.monoLossDb < -6 && <div><b>Klingt im Spiel dünner:</b> GTA spielt den Sound in Mono, dabei löschen sich Teile des Stereo-Sounds aus ({inGame.info.monoLossDb.toFixed(0)} dB).</div>}
         </div></div>
       )}

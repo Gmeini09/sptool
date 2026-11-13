@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"sptool/windows/basefind"
 )
 
 var awcKeySHA1, _ = hex.DecodeString("c31e0da1c7e5d85502e517290ed07b180a94e911")
@@ -75,8 +77,23 @@ func gtaAPI(w http.ResponseWriter, r *http.Request) bool {
 			http.Error(w, "bad name", http.StatusBadRequest)
 			return true
 		}
+		// the GTA V folder – unless a soundpack was installed there: then the original from SP Tool's own backup
+		canon := "WEAPONS_PLAYER.rpf"
+		if strings.EqualFold(name, "RESIDENT.rpf") {
+			canon = "RESIDENT.rpf"
+		}
+		var paths []string
 		for _, d := range gtaDirs(r) {
-			b, err := os.ReadFile(filepath.Join(d, "x64", "audio", "sfx", name))
+			paths = append(paths, filepath.Join(d, "x64", "audio", "sfx", canon))
+		}
+		if bs, err := filepath.Glob(filepath.Join(dataDir, "backups", "*", canon)); err == nil {
+			paths = append(paths, bs...)
+		}
+		for _, p := range paths {
+			if st, err := os.Stat(p); err != nil || !basefind.IsOriginal(canon, st.Size()) {
+				continue
+			}
+			b, err := os.ReadFile(p)
 			if err != nil {
 				continue
 			}

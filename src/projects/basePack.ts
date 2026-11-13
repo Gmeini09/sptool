@@ -131,22 +131,20 @@ export async function originalFromGta(): Promise<BaseFile[]> {
 /** A found soundpack that is Rockstar's original (both archives, original sizes). */
 export const isOriginalCandidate = (c: BaseCandidate) => ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf'].every((n) => c.files.some((f) => f.name.toLowerCase() === n.toLowerCase() && f.size === ORIGINAL_SIZES[n]));
 
-const ORIGINAL_TRIED = 'sptool:original-tried-2';
 /**
  * The original GTA V soundpack is the template whenever it is on this PC (Windows app): from the GTA V folder, else
  * from wherever the PC search finds it (e.g. Downloads). Runs on start; quiet when there is none (checked once a day).
  * Returns true when it switched to the original.
  */
-export async function preferOriginal(): Promise<boolean> {
+let originalTried = false;
+export async function preferOriginal(force = false): Promise<boolean> {
   if (baseInfo()?.label === ORIGINAL_LABEL && getBasePack()) return false;
   if (!(await nativeInfo().catch(() => null))) return false;
-  const last = loadJSON<number>(ORIGINAL_TRIED, 0);
-  if (Date.now() - last < 86_400_000 && baseInfo()) return false;
-  saveJSON(ORIGINAL_TRIED, Date.now());
+  if (originalTried && !force) return false; // once per start (the PC search takes a few seconds)
+  originalTried = true;
   const files = await findOriginalFiles().catch(() => null);
   if (!files) return false;
   try { await adoptOriginal(files); } catch (e) { logger.warn(`Original-GTA-Soundpack gefunden, aber nicht nutzbar: ${e instanceof Error ? e.message : String(e)}`); return false; }
-  removeKey(ORIGINAL_TRIED);
   return true;
 }
 
@@ -199,6 +197,11 @@ export function rankCandidates(list: BaseCandidate[]): BaseCandidate[] {
  */
 export async function ensureBase(onStage?: (s: string) => void): Promise<Pack | null> {
   if (!getBasePack()) await restoreBase();
+  // the original GTA V soundpack is THE template: taken whenever it is on this PC, never replaced by another pack
+  if (baseInfo()?.label !== ORIGINAL_LABEL && (await nativeInfo().catch(() => null))) {
+    onStage?.('Original-GTA-Soundpack wird gesucht…');
+    if (await preferOriginal(true).catch(() => false)) return getBasePack()?.pack ?? null;
+  }
   if (getBasePack()) return completeBase(onStage);
   if (!(await nativeInfo().catch(() => null))) return null;
   onStage?.('Soundpack-Dateien auf deinem PC werden gesucht…');
@@ -264,6 +267,7 @@ async function roomiest(list: BaseCandidate[], onStage?: (s: string) => void): P
  */
 export async function moreRoomBase(onStage?: (s: string) => void): Promise<string | null> {
   if (!(await nativeInfo().catch(() => null))) return null;
+  if (baseInfo()?.label === ORIGINAL_LABEL) return null; // the original stays the template
   const cur = getBasePack()?.pack;
   const have = cur ? await soundRoom(cur) : 0;
   onStage?.('Soundpack-Dateien auf deinem PC werden gesucht…');
