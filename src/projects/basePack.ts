@@ -7,6 +7,7 @@ import { loadJSON, saveJSON, getBlob, putBlob, deleteBlob, removeKey } from '../
 import { logger } from '../services/logger';
 import { openPack, type Pack } from '../formats/pack';
 import { readRpfHeader } from '../formats/rpf';
+import { findGtaKey, hasGtaKey, NeedGtaKeyError, originalArchive, setGtaKey } from '../formats/gtaOriginal';
 import { listZip, readZipEntry } from '../formats/zip';
 import { loadMapping } from '../formats/mapping';
 import { WEAPON_PROFILES } from '../weapons/profiles';
@@ -88,11 +89,57 @@ export async function forgetBase() {
   for (const n of ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf']) await deleteBlob(blobKey(n));
 }
 
+// ── The original GTA V soundpack as template ─────────────────────────────────────────────────────────────────────
+export const ORIGINAL_LABEL = 'Original GTA V';
+/** true when these files are Rockstar's original archives (also once SP Tool patched them). */
+export const isOriginalPack = (files: BaseFile[]) => files.some((f) => !!originalArchive(f.bytes));
+
+const hexBytes = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+/**
+ * The AWC key for the original archives: kept from last time, from a GTA5.exe the user dropped, or – in the Windows
+ * app – read from the GTA5.exe in the GTA V folder.
+ */
+export async function ensureGtaKey(dropped: File[] = []): Promise<void> {
+  if (hasGtaKey()) return;
+  const exe = dropped.find((f) => /^gta5\.exe$/i.test(f.name));
+  if (exe) {
+    const k = findGtaKey(new Uint8Array(await exe.arrayBuffer()));
+    if (!k) throw new BaseError('In dieser GTA5.exe wurde der Schlüssel nicht gefunden – nimm die GTA5.exe von GTA V Legacy (nicht GTA5_Enhanced.exe).');
+    setGtaKey(k);
+    return;
+  }
+  if (await nativeInfo().catch(() => null)) {
+    const r = await fetch('/native/gta/awckey', { headers: { 'X-SPTool-Native': '1' } });
+    if (r.ok) { setGtaKey(hexBytes(((await r.json()) as { key: string }).key)); return; }
+  }
+  throw new NeedGtaKeyError();
+}
+
+/** Windows app: the original WEAPONS_PLAYER.rpf + RESIDENT.rpf straight from the GTA V folder (x64/audio/sfx). */
+export async function originalFromGta(): Promise<BaseFile[]> {
+  if (!(await nativeInfo().catch(() => null))) throw new BaseError('Das geht nur in der Windows-App – zieh das Original-Soundpack hier rein.');
+  const files: BaseFile[] = [];
+  for (const name of ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf']) {
+    const r = await fetch(`/native/gta/sfx?name=${name}`, { headers: { 'X-SPTool-Native': '1' } });
+    if (!r.ok) throw new BaseError('GTA V wurde auf diesem PC nicht gefunden. Zieh das Original-Soundpack (WEAPONS_PLAYER.rpf + RESIDENT.rpf) hier rein.');
+    files.push({ name, bytes: new Uint8Array(await r.arrayBuffer()) });
+  }
+  if (!files.every((f) => originalArchive(f.bytes))) throw new BaseError('Im GTA-V-Ordner liegt nicht mehr das Original (dort ist schon ein Soundpack eingebaut). Zieh das Original-Soundpack hier rein.');
+  return files;
+}
+
+/** Uses Rockstar's original soundpack as template ("Original behalten" then sounds like GTA V). */
+export async function adoptOriginal(files: BaseFile[], dropped: File[] = []): Promise<Pack> {
+  await ensureGtaKey(dropped);
+  return adoptBase(files.filter((f) => originalArchive(f.bytes)), 'Rockstar', ORIGINAL_LABEL);
+}
+
 /** Files the user picked or dropped: .rpf files and/or soundpack ZIPs. */
 export async function baseFromUserFiles(list: File[]): Promise<{ files: BaseFile[]; label: string }> {
   const files: BaseFile[] = [];
   let label = list[0]?.name ?? 'Eigene Dateien';
   for (const f of list) {
+    if (/^gta5\.exe$/i.test(f.name)) continue; // the key for the original pack (ensureGtaKey)
     if (/\.(rar|7z)$/i.test(f.name)) throw new BaseError(`${f.name} ist ein RAR/7z-Archiv – das kann SP Tool nicht öffnen. Bitte erst entpacken (Rechtsklick → „Alle extrahieren“ bzw. WinRAR) und dann die .rpf-Dateien oder den Ordner-Inhalt hier reinziehen.`);
     const bytes = new Uint8Array(await f.arrayBuffer());
     if (/\.zip$/i.test(f.name)) {

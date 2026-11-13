@@ -30,6 +30,8 @@
 .base-drop:hover, .base-pick.over .base-drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
 .base-drop b { color: var(--text); }
 .base-found { display: grid; gap: 8px; }
+.base-original { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-card); background: color-mix(in srgb, var(--accent) 5%, transparent); color: var(--text-2); }
+.base-original b { color: var(--text); }
 .base-cand { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--card); animation: rise var(--t-slow, 420ms) var(--ease-out, ease) both; }
 .base-cand:nth-child(3) { animation-delay: 50ms; } .base-cand:nth-child(4) { animation-delay: 100ms; }
 .base-ok { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-card); border: 1px solid color-mix(in srgb, var(--ok, #3fb67f) 45%, var(--border-soft)); background: color-mix(in srgb, var(--ok, #3fb67f) 8%, var(--card)); }

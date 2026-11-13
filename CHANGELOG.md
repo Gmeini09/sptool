@@ -15,6 +15,7 @@ Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version
 - Nachladen: Die alten Reload-Vorlagen sind raus – neu sind 4 freie Reload-Sounds aus dem Internet (CC0, gemeinfrei), oder du nimmst deinen eigenen
 - „Ist ein Schuss“ / „Ist Nachladen“ lässt keine falsch einsortierten Sounds mehr zurück
 - Hinweis beim Nachladen: Bei „In Teile schneiden“ wirkt im Spiel bisher nur „Magazin raus“
+- Neu: Das Original-GTA-Soundpack als Vorlage – Original-Dateien (WEAPONS_PLAYER.rpf + RESIDENT.rpf) reinziehen oder in der Windows-App „Aus GTA-Ordner“ klicken. „Original behalten“ klingt dann wie in GTA V. Den Schlüssel zum Öffnen liest SP Tool einmal aus deiner eigenen GTA5.exe (er bleibt nur auf deinem PC)
 - Sounds kommen 1 : 1 ins Spiel: eigene Länge, eigene Abtastrate, eigene Lautstärke – SP Tool kürzt, normalisiert und rechnet nichts mehr selbst um. Passt ein Sound nicht in die Vorlage, bricht das Erstellen mit „… ist X s zu lang“ ab: kürze ihn selbst im Editor oder nimm eine Vorlage mit mehr Platz
 - Vorlage mit Platz: Beim ersten Einrichten nimmt SP Tool unter deinen Soundpacks automatisch das mit dem meisten Platz für lange Sounds. Passt ein Sound trotzdem nicht, sucht „Vorlage mit mehr Platz suchen“ auf deinem PC nach einer besseren
 - Import: WAV-Dateien werden genau so übernommen, wie sie sind (keine Umrechnung der Abtastrate, keine Stille am Anfang/Ende abgeschnitten)

@@ -7,7 +7,7 @@ import { writeAwc, type AwcFile, type AwcStream } from './awc';
 import { findAwcs, patchAwcInPlace, readRpfHeader, type FoundAwc, type RpfHeader } from './rpf';
 
 export interface PackArchive { name: string; bytes: Uint8Array; header: RpfHeader; containers: FoundAwc[] }
-export interface ContainerRef { archive: number; index: number; offset: number; length: number }
+export interface ContainerRef { archive: number; index: number; offset: number; length: number; encrypted?: boolean }
 export interface ContainerGroup { id: number; awc: AwcFile; length: number; refs: ContainerRef[] }
 export interface Pack { archives: PackArchive[]; groups: ContainerGroup[] }
 
@@ -31,7 +31,7 @@ export function openPack(files: Array<{ name: string; bytes: Uint8Array }>): Pac
     const view = a.bytes.subarray(c.offset, c.offset + c.length);
     const k = `${c.length}:${fnv1a(view)}`;
     const candidates = byHash.get(k) ?? [];
-    const ref: ContainerRef = { archive: ai, index: ci, offset: c.offset, length: c.length };
+    const ref: ContainerRef = { archive: ai, index: ci, offset: c.offset, length: c.length, encrypted: c.encrypted };
     const match = candidates.find((g) => {
       const r = g.refs[0];
       return sameBytes(archives[r.archive].bytes.subarray(r.offset, r.offset + r.length), view);

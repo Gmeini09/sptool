@@ -8,9 +8,10 @@
 //    because the replacement has exactly the same byte length, the (encrypted)
 //    table of contents stays valid and is never touched.
 //
-// Not implemented on purpose: decrypting NG tables of contents. That needs keys
-// derived from the user's own GTA5.exe and is planned as a separate, opt-in step.
+// The original game archives (encrypted table of contents and encrypted AWC files) are
+// read through gtaOriginal.ts: known file positions + the AWC key from the user's GTA5.exe.
 import { AwcError, parseAwc, type AwcFile } from './awc';
+import { originalContainers } from './gtaOriginal';
 
 export const RPF7_MAGIC = 0x52504637; // "7FPR" on disk
 export type RpfEncryption = 'none' | 'open' | 'aes' | 'ng' | 'unknown';
@@ -30,6 +31,8 @@ export interface FoundAwc {
   /** exact container length as derived from its own chunk table */
   length: number;
   awc: AwcFile;
+  /** still encrypted in the archive (original GTA file) – replaced by the plain file when patched */
+  encrypted?: boolean;
 }
 
 export class RpfError extends Error {}
@@ -70,6 +73,8 @@ export function awcLength(bytes: Uint8Array, offset: number): number {
  */
 export function findAwcs(bytes: Uint8Array): FoundAwc[] {
   const h = readRpfHeader(bytes);
+  const original = originalContainers(bytes);
+  if (original) return original;
   const out: FoundAwc[] = [];
   const start = Math.ceil(h.tocEnd / 512) * 512;
   for (let o = start; o + 16 <= bytes.byteLength; o += 512) {
@@ -91,7 +96,7 @@ export function findAwcs(bytes: Uint8Array): FoundAwc[] {
  * Returns a patched COPY of the archive with one container replaced. Refuses anything that
  * would change the container size, because the table of contents would then be wrong.
  */
-export function patchAwcInPlace(archive: Uint8Array, target: { offset: number; length: number }, newAwc: Uint8Array): Uint8Array {
+export function patchAwcInPlace(archive: Uint8Array, target: { offset: number; length: number; encrypted?: boolean }, newAwc: Uint8Array): Uint8Array {
   if (newAwc.byteLength !== target.length) {
     throw new RpfError(`Der Ersatz-Container hat ${newAwc.byteLength} Bytes, muss aber genau ${target.length} Bytes haben, damit das Archiv gültig bleibt.`);
   }
@@ -100,7 +105,7 @@ export function patchAwcInPlace(archive: Uint8Array, target: { offset: number; l
     throw new RpfError('Die Zielposition des Containers liegt nicht im Datenbereich des Archivs.');
   }
   const v = new DataView(archive.buffer, archive.byteOffset + target.offset, 4);
-  if (v.getUint32(0, true) !== 0x54414441) throw new RpfError('An der Zielposition liegt kein AWC-Container.');
+  if (!target.encrypted && v.getUint32(0, true) !== 0x54414441) throw new RpfError('An der Zielposition liegt kein AWC-Container.');
   const copy = new Uint8Array(archive); // original stays untouched
   copy.set(newAwc, target.offset);
   return copy;
