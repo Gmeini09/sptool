@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 (globalThis as unknown as { localStorage: unknown }).localStorage ??= { getItem: () => null, setItem() {}, removeItem() {}, key: () => null, length: 0 };
-const { findGtaKey, setGtaKey, originalArchive, NeedGtaKeyError } = await import('../src/formats/gtaOriginal');
+const { findGtaKey, setGtaKey, originalArchive, NeedGtaKeyError, isExactOriginal } = await import('../src/formats/gtaOriginal');
 const { openPack } = await import('../src/formats/pack');
 const { streamToAudio } = await import('../src/formats/awc');
 const { parseMapping } = await import('../src/formats/mapping');
@@ -54,4 +54,13 @@ test('original pack as template: every sound file opens, the pistol shot is writ
   const changed: number[] = [];
   for (let o = 0; o < wp.length; o += 512) if (wp[o] !== wp0[o] || wp[o + 7] !== wp0[o + 7]) changed.push(o);
   assert.ok(changed.length > 0 && changed.every((o) => o >= 959488 && o < 959488 + 64512), `only ptl_pistol.awc changed (${changed.length} blocks)`);
+});
+
+test('only the untouched original is accepted – a custom pack patched in place (same size, same TOC) is not', { skip }, async () => {
+  const f = files();
+  assert.ok(await isExactOriginal('WEAPONS_PLAYER.rpf', f[0].bytes));
+  assert.ok(await isExactOriginal('RESIDENT.rpf', f[1].bytes));
+  const patched = new Uint8Array(f[0].bytes); patched[959488 + 200] ^= 0xff; // one byte of ptl_pistol.awc
+  assert.ok(originalArchive(patched), 'looks like the original by size and table of contents');
+  assert.equal(await isExactOriginal('WEAPONS_PLAYER.rpf', patched), false, 'but is not taken as template');
 });

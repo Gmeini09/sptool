@@ -59,6 +59,22 @@ const ORIGINAL: OriginalArchive[] = [
   ] },
 ];
 
+/**
+ * SHA-256 of the untouched original archives. Only files exactly like these become the template: a GTA V folder with
+ * a custom soundpack in it – even one patched in place with the original size – would otherwise mix its sounds in.
+ */
+const ORIGINAL_SHA256: Record<string, string> = {
+  'WEAPONS_PLAYER.rpf': 'e1b45a90ca538e0dc540aedbc174fc8a9e9faafb24ed56e4d01eccefcfbd9916',
+  'RESIDENT.rpf': '5b3313e01f71bca0d1f5258ab1a95899752e54a996e5d11676fc38f0159e785e',
+};
+/** true when the bytes are exactly Rockstar's untouched archive of that name. */
+export async function isExactOriginal(name: string, bytes: Uint8Array): Promise<boolean> {
+  const want = ORIGINAL_SHA256[name];
+  if (!want || bytes.length !== ORIGINAL.find((a) => a.name === name)?.size) return false;
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as unknown as ArrayBuffer));
+  return [...d].map((b) => b.toString(16).padStart(2, '0')).join('') === want;
+}
+
 /** Byte size of each original archive – to recognise them in a file list before reading them. */
 export const ORIGINAL_SIZES: Record<string, number> = Object.fromEntries(ORIGINAL.map((a) => [a.name, a.size]));
 

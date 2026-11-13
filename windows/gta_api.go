@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"os"
@@ -18,6 +19,12 @@ import (
 )
 
 var awcKeySHA1, _ = hex.DecodeString("c31e0da1c7e5d85502e517290ed07b180a94e911")
+
+// originalSHA256: the untouched original archives (same as src/formats/gtaOriginal.ts)
+var originalSHA256 = map[string]string{
+	"WEAPONS_PLAYER.rpf": "e1b45a90ca538e0dc540aedbc174fc8a9e9faafb24ed56e4d01eccefcfbd9916",
+	"RESIDENT.rpf":       "5b3313e01f71bca0d1f5258ab1a95899752e54a996e5d11676fc38f0159e785e",
+}
 
 // gtaDirs: the GTA V folders to look in – the one the user chose in FiveM first, then the detected installs.
 func gtaDirs(r *http.Request) []string {
@@ -95,6 +102,10 @@ func gtaAPI(w http.ResponseWriter, r *http.Request) bool {
 			}
 			b, err := os.ReadFile(p)
 			if err != nil {
+				continue
+			}
+			// byte for byte Rockstar's file – a custom soundpack patched in place would mix its sounds in
+			if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != originalSHA256[canon] {
 				continue
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")

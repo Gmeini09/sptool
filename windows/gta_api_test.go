@@ -1,8 +1,8 @@
 package main
 
 import (
-	"crypto/sha1"
 	"bytes"
+	"crypto/sha1"
 	"os"
 	"testing"
 )
