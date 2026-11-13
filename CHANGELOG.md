@@ -7,7 +7,7 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
 ## 1.10.12 – 28.10.2026
-- Pistol MK2: Der Schuss wurde in die Datei der Pistol .50 (ptl_50cal) geschrieben – die falsche Zuordnung ist raus, die MK2 zeigt „noch ohne Wirkung“, bis der Suchtest im Spiel ihre Datei findet
+- Pistol MK2: Der Schuss wurde in die Datei der Pistol .50 (ptl_50cal) geschrieben – behoben. GTA spielt für die MK2 denselben Schuss wie für die Pistol (ptl_pistol); „Original“ spielt ihn jetzt, und wählst du für Pistol und MK2 verschiedene Sounds, sagt SP Tool dir das (im Spiel kann nur einer kommen)
 - Soundpack erstellen: „So klingt es im Spiel“ spielt deinen Sound genau so, wie er in die Spieldatei kommt
 - Soundpack erstellen: Neuer Knopf „Bearbeiten“ öffnet deinen gewählten Schuss oder Reload direkt im Editor (kürzen, Lautstärke, Effekte …) – „Speichern und übernehmen“ legt einen neuen Sound an (z. B. „Turbo 37 bearbeitet“), setzt ihn ein und zeigt ihn oben in der Liste – das Original bleibt unverändert
 - Behoben: Ein bearbeiteter Turbo-Sound klang wie das Original (die Änderungen gingen verloren); Turbo-Sounds werden außerdem mit ihrer eigenen Abtastrate geladen

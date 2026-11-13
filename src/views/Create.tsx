@@ -22,7 +22,7 @@ import type { LibraryEntry, Style, WeaponId } from '../models/types';
 import { renderAssignment } from '../projects/actions';
 import { baseInfo, ensureBase, moreRoomBase } from '../projects/basePack';
 import { soundReport } from '../projects/report';
-import { blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
+import { SAME_SOUND, blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { SoundEditorOverlay } from './Editor';
 import { openPack, type Pack } from '../formats/pack';
 import { streamToAudio } from '../formats/awc';
@@ -537,6 +537,18 @@ export function CreateView() {
               {fireLib(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.featured ? `★ ${e.style}` : e.style} onPick={() => { pickFire(cur, e.id); void previewEntry(e); }} />)}
             </div>
           </>}
+          {cur && SAME_SOUND[`${cur}:fire`] && (() => {
+            const other = SAME_SOUND[`${cur}:fire`].weapon as WeaponId, mine = fire[cur], theirs = fire[other];
+            const both = !!mine && mine !== ORIGINAL && !!theirs && theirs !== ORIGINAL && mine !== theirs;
+            return (
+              <div className={`callout small${both ? ' danger' : ''}`} style={{ marginTop: 12 }}><Icon name={both ? 'alert' : 'info'} size={16} /><div>
+                <b>Die {label(cur)} hat in GTA denselben Schuss wie die {label(other)}</b> (das Spiel ändert nur Tonhöhe und Klang etwas).{' '}
+                {both ? <>Du hast zwei verschiedene Sounds gewählt – im Spiel kann nur einer kommen. Wähl hier denselben Sound wie bei der {label(other)} oder „Original behalten“.</>
+                  : mine && mine !== ORIGINAL ? <>Dein Sound hier gilt im Spiel auch für die {label(other)}.</>
+                  : theirs && theirs !== ORIGINAL ? <>Dein Sound der {label(other)} gilt im Spiel auch für die {label(cur)}.</> : null}
+              </div></div>
+            );
+          })()}
           {fire[cur] && fire[cur] !== ORIGINAL && fireStatus(cur) && !ok(fireStatus(cur)!) && (
             fireStatus(cur)!.status === 'not-in-base'
               ? <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div>Deine Vorlage enthält den Schuss der {label(cur)} nicht. Nimm als Vorlage ein Soundpack, das die {label(cur)} auch ändert – dann wirkt dein Sound im Spiel.</div></div>

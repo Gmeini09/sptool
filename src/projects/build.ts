@@ -29,6 +29,14 @@ export function indexPack(pack: Pack): Map<string, number[]> {
   return idx;
 }
 
+/**
+ * Sounds GTA plays from the same file: the Pistol MK2 fires the Pistol's shot (ptl_pistol.awc – heard in the original
+ * template; the game only changes pitch and tone per weapon). Used when the slot has no mapping of its own.
+ */
+export const SAME_SOUND: Record<string, { weapon: WeaponProfile['id']; slot: string }> = {
+  'pistol_mk2:fire': { weapon: 'pistol', slot: 'fire' },
+};
+
 export function planBuild(project: Project, profiles: WeaponProfile[], mapping: Mapping, pack: Pack | null): BuildPlan {
   const idx = pack ? indexPack(pack) : new Map<string, number[]>();
   const items: PlanItem[] = [];
@@ -37,7 +45,8 @@ export function planBuild(project: Project, profiles: WeaponProfile[], mapping: 
     for (const s of prof.slots) {
       const a = slots[s.id];
       if (!a) continue;
-      const mapped = streamsFor(mapping, prof.id, s.id);
+      const own = streamsFor(mapping, prof.id, s.id), alias = SAME_SOUND[`${prof.id}:${s.id}`];
+      const mapped = own.length || !alias ? own : streamsFor(mapping, alias.weapon, alias.slot);
       const targets: BuildTarget[] = [];
       for (const m of mapped) for (const gi of idx.get(m.file) ?? []) {
         if (pack!.groups[gi].awc.streams.some((st) => st.id === m.stream)) targets.push({ group: gi, stream: m.stream });
@@ -65,6 +74,25 @@ export const sharedReload = (plan: BuildPlan, i: PlanItem) => i.status !== 'read
   && plan.items.some((o) => o !== i && o.status === 'ready' && o.slot === i.slot && o.assignment.entryId === i.assignment.entryId);
 
 /** Selections that cannot be written into the game yet ("Pistol .50 · Schuss"): unmapped or missing in the base. */
+/**
+ * Two slots that GTA plays from the same file (e.g. Pistol and Pistol MK2 shot) with different sounds – only one can be
+ * in the game. Returns the message, or null. SP Tool never picks one by itself.
+ */
+export function sameSoundClash(plan: BuildPlan): string | null {
+  const at = new Map<string, PlanItem>();
+  for (const it of plan.items) {
+    if (it.status !== 'ready') continue;
+    for (const t of it.targets) {
+      const k = `${t.group}:${t.stream}`, o = at.get(k);
+      if (o && o !== it && o.assignment.entryId !== it.assignment.entryId) {
+        return `${o.weaponLabel} und ${it.weaponLabel} benutzen in GTA denselben Sound (${o.slotLabel}) – im Spiel kann nur einer davon kommen. Wähl bei beiden denselben Sound oder bei einer der beiden „Original behalten“.`;
+      }
+      at.set(k, it);
+    }
+  }
+  return null;
+}
+
 export const blockedLabels = (plan: BuildPlan) => [...new Set(plan.items.filter((i) => i.status !== 'ready' && i.assignment.entryId !== SILENCE && !sharedReload(plan, i)).map((i) => `${i.weaponLabel} · ${i.slotLabel}`))];
 
 /** true when every output archive is byte-for-byte the base archive of the same name – the build changed nothing. */
@@ -142,6 +170,8 @@ function overSeconds(over: number, sounds: AudioData[]): number {
 export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssignment) => Promise<AudioData>, onProgress?: (done: number, total: number, label: string) => void, opts: { allowEmpty?: boolean; allArchives?: boolean } = {}): Promise<BuildResult> {
   const ready = plan.items.filter((i) => i.status === 'ready');
   if (!ready.length && !opts.allowEmpty) throw new Error('Nichts zu bauen: Kein befüllter Slot ist einem Sound im Basis-Pack zugeordnet.');
+  const clash = sameSoundClash(plan);
+  if (clash) throw new Error(clash);
   const want = new Map<number, Map<number, AudioData | null>>();
   const labels = new Map<number, Set<string>>(); // group → slots with an own sound in it (for "zu lang")
   let replaced = 0;

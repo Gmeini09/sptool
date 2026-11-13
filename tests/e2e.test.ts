@@ -64,12 +64,17 @@ test('a sound longer than the template has room for is never cut: the build stop
   });
 });
 
-test('shipped mapping: Pistol and .50 shots are written; the MK2 shot is not mapped and never touches the .50 file (F02)', async () => {
+test('shipped mapping: Pistol and .50 shots are written; the MK2 shares the Pistol file and never touches the .50 file (F02)', async () => {
   const pack = openPack(files);
   let p = newProject('t', 'x');
   for (const w of ['pistol', 'pistol_mk2', 'pistol50'] as const) p = assign(p, w, 'fire', { entryId: w });
-  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:unmapped', 'pistol50:ready']);
+  let plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:ready', 'pistol50:ready']);
+  assert.deepEqual(plan.items[1].targets, plan.items[0].targets, 'MK2 = Pistol file');
+  // two different sounds for one GTA sound: SP Tool says so instead of picking one
+  await assert.rejects(runBuild(plan, pack, async () => tone(0.2)), /Pistol und Pistol MK2 benutzen in GTA denselben Sound/);
+  p = assign(p, 'pistol_mk2', 'fire', { entryId: 'pistol' });
+  plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
   const r = await runBuild(plan, pack, async (a) => tone(0.2, a.entryId === 'pistol50' ? 110 : 330));
   const out = openPack(r.outputs);
   assert.notDeepEqual(streamOf(out, 'F04', 369994369)[0].data, streamOf(pack, 'F04', 369994369)[0].data, 'F04 written');
