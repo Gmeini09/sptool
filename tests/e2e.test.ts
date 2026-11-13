@@ -64,15 +64,16 @@ test('a sound longer than the template has room for is never cut: the build stop
   });
 });
 
-test('shipped mapping: Pistol, MK2 and .50 shots are written (each into its file and its F01 copy)', async () => {
+test('shipped mapping: Pistol and .50 shots are written; the MK2 shot is not mapped and never touches the .50 file (F02)', async () => {
   const pack = openPack(files);
   let p = newProject('t', 'x');
   for (const w of ['pistol', 'pistol_mk2', 'pistol50'] as const) p = assign(p, w, 'fire', { entryId: w });
   const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:ready', 'pistol50:ready']);
+  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:unmapped', 'pistol50:ready']);
   const r = await runBuild(plan, pack, async (a) => tone(0.2, a.entryId === 'pistol50' ? 110 : 330));
   const out = openPack(r.outputs);
-  for (const [f, id] of [['F02', 182780901], ['F04', 369994369]] as const) assert.notDeepEqual(streamOf(out, f, id)[0].data, streamOf(pack, f, id)[0].data, `${f} written`);
+  assert.notDeepEqual(streamOf(out, 'F04', 369994369)[0].data, streamOf(pack, 'F04', 369994369)[0].data, 'F04 written');
+  assert.deepEqual(streamOf(out, 'F02', 182780901)[0].data, streamOf(pack, 'F02', 182780901)[0].data, 'F02 (ptl_50cal) untouched');
   const t = buildGameTest(pack);
   assert.ok(t.groups.filter((g) => !g.freq).every((g) => g.found > 0), 'all shot candidates found in the pack');
   const m = applyGameTest(shipped, { 'pistol:fire': 3, 'pistol_mk2:fire': 1, 'pistol50:fire': 2 }).mapping;
