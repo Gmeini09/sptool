@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { engine } from '../audio/engine';
 import { audioWorker } from '../audio/workerClient';
 import { addUserEntry, navigate, notify, openInEditor, setState, toast, useApp } from '../app/store';
@@ -77,7 +78,21 @@ export function EditorView() {
   return <EditorSession key={entry.id} entry={entry} />;
 }
 
-function EditorSession({ entry }: { entry: LibraryEntry }) {
+/**
+ * The editor over another page (e.g. "Soundpack erstellen"): edits one sound, onSaved gets the id of the saved
+ * version (a new sound, or the same one when it already was an edit) – the original always stays as it is.
+ */
+export function SoundEditorOverlay({ entryId, onSaved, onClose }: { entryId: string; onSaved: (id: string) => void; onClose: () => void }) {
+  const entry = entryById(entryId); // closed with its X, which asks first when there are unsaved changes
+  return createPortal(
+    <div className="editor-overlay" role="dialog" aria-modal="true" aria-label="Sound bearbeiten">
+      {entry ? <EditorSession key={entry.id} entry={entry} embedded={{ onSaved, onClose }} /> : <div className="page"><EmptyState icon="alert" title="Sound nicht gefunden" body="Dieser Sound ist nicht mehr in deiner Bibliothek." action={<Button onClick={onClose}>Schließen</Button>} /></div>}
+    </div>,
+    document.body,
+  );
+}
+
+function EditorSession({ entry, embedded }: { entry: LibraryEntry; embedded?: { onSaved: (id: string) => void; onClose: () => void } }) {
   const isEdit = !!entry.edit;
   const baseEntry = isEdit ? entryById(entry.edit!.baseId) : entry;
   const [source, setSource] = useState<AudioData | null>(null);
@@ -222,6 +237,7 @@ function EditorSession({ entry }: { entry: LibraryEntry }) {
       setState((s) => ({ userEntries: s.userEntries.map((u) => u.id === entry.id ? { ...u, edit: { baseId: baseEntry.id, state, markers } } : u) }));
       invalidate(entry.id);
       toast('success', 'Änderungen gespeichert', entry.name);
+      embedded?.onSaved(entry.id);
     } else {
       const id = newId('edit');
       const name = `${entry.name} (bearbeitet)`;
@@ -231,7 +247,7 @@ function EditorSession({ entry }: { entry: LibraryEntry }) {
       });
       toast('success', 'Als neuer Sound gespeichert', `${name} – das Original bleibt unverändert.`);
       notify('Bearbeiteter Sound gespeichert', name);
-      openInEditor(id);
+      if (embedded) embedded.onSaved(id); else openInEditor(id);
     }
     setDirty(false);
   };
@@ -266,7 +282,7 @@ function EditorSession({ entry }: { entry: LibraryEntry }) {
         <div className="ed-head">
           <IconButton icon="x" title={dirty && !discardArmed ? 'Editor schließen' : 'Schließen und Änderungen verwerfen'} onClick={() => {
             if (dirty && !discardArmed) { setDiscardArmed(true); toast('warning', 'Ungespeicherte Änderungen', 'Tipp nochmal auf Schließen, um sie zu verwerfen, oder speichere vorher.'); setTimeout(() => setDiscardArmed(false), 4000); return; }
-            engine.stop(); setState({ editorEntryId: null });
+            engine.stop(); if (embedded) embedded.onClose(); else setState({ editorEntryId: null });
           }} />
           <div style={{ minWidth: 0 }}>
             <h2>{entry.name}</h2>
@@ -280,7 +296,7 @@ function EditorSession({ entry }: { entry: LibraryEntry }) {
           </div>
           <Button size="sm" icon="copy" onClick={() => { setSlots((s) => ({ ...s, C: JSON.parse(JSON.stringify(s.B)) })); setMode('C'); }} title="B nach C kopieren, um eine Alternative auszuprobieren">{slots.C ? 'C aus B zurücksetzen' : 'C aus B erstellen'}</Button>
           <Button size="sm" icon="export" onClick={() => void exportWav()} disabled={!current}>{mode} exportieren</Button>
-          <Button size="sm" variant="primary" icon="check" onClick={save}>{isEdit ? 'Änderungen speichern' : 'Als neuen Sound speichern'}</Button>
+          <Button size="sm" variant="primary" icon="check" onClick={save}>{embedded ? 'Speichern und übernehmen' : isEdit ? 'Änderungen speichern' : 'Als neuen Sound speichern'}</Button>
         </div>
 
         <WaveformEditor

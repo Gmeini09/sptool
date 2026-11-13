@@ -23,6 +23,7 @@ import { renderAssignment } from '../projects/actions';
 import { baseInfo, ensureBase, moreRoomBase } from '../projects/basePack';
 import { soundReport } from '../projects/report';
 import { blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
+import { SoundEditorOverlay } from './Editor';
 import { openPack, type Pack } from '../formats/pack';
 import { streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
@@ -192,6 +193,7 @@ export function CreateView() {
   // "So klingt es im Spiel": the sound exactly as it is written into the game file (1 : 1, mono) – worked out ahead,
   // so "passt nicht in die Vorlage" shows before "Soundpack erstellen"
   const [inGame, setInGame] = useState<{ key: string; info: InGameSound } | null>(null);
+  const [editRev, setEditRev] = useState(0); // a sound was edited (also in place): plan the preview anew
   const gameItem = (p: BuildPlan): PlanItem | undefined => cur
     ? p.items.find((i) => i.weapon === cur && i.slot === 'fire')
     : step === RELOAD_STEP ? p.items.find((i) => RELOAD_SLOTS.includes(i.slot as typeof RELOAD_SLOTS[number]) && i.status === 'ready' && i.assignment.entryId !== SILENCE) : undefined;
@@ -204,7 +206,7 @@ export function CreateView() {
     let live = true;
     void inGameAudio(p, quickPack, it, renderAssignment).then((info) => { if (live && info) setInGame({ key: gameKey(it), info }); }).catch((e) => logger.warn(`Im-Spiel-Vorschau: ${e instanceof Error ? e.message : String(e)}`));
     return () => { live = false; };
-  }, [fire, reload, quickPack, mapRev, step]);
+  }, [fire, reload, quickPack, mapRev, step, editRev]);
   const playInGame = async () => {
     if (inGame && engine.playingKey === inGame.key) { engine.stop(); return; }
     engine.unlock();
@@ -229,6 +231,15 @@ export function CreateView() {
     }
   };
   const num = (x: number) => x.toFixed(1).replace(".", ",");
+  // "Bearbeiten": the sound of this step in the editor (over this page); the saved version takes its place
+  const [editing, setEditing] = useState<{ id: string; put: (id: string) => void } | null>(null);
+  const editTarget = (): { id: string; put: (id: string) => void } | null => {
+    if (cur) { const id = fire[cur]; const w = cur; return id && id !== ORIGINAL ? { id, put: (n) => pickFire(w, n) } : null; }
+    const rel = reloadIds();
+    const k = RELOAD_SLOTS.find((s) => rel[s] && rel[s] !== SILENCE);
+    if (!k) return null;
+    return { id: rel[k], put: (n) => setReload((r) => (r.mode === 'single' ? { ...r, single: { ...r.single, [k]: n } } : { ...r, whole: { ...(r.whole ?? {}), [k]: n } })) };
+  };
   // "Original": the sound that sits in the template at that place now – to compare with yours
   const playOriginal = () => {
     const key = 'ingame:original';
@@ -254,8 +265,10 @@ export function CreateView() {
   const inGameHint = (
     <div className="create-ingame">
       <Button size="sm" icon={playing && inGame && playing === inGame.key ? 'stop' : 'gamepad'} disabled={!!busy} onClick={() => void playInGame()}>So klingt es im Spiel</Button>
+      <Button size="sm" icon="wave" disabled={!!busy || !editTarget()} title="Diesen Sound kürzen, lauter/leiser machen, Effekte … – das Original bleibt unverändert" onClick={() => { engine.stop(); setEditing(editTarget()); }}>Bearbeiten</Button>
       <Button size="sm" variant="ghost" icon={playing === 'ingame:original' ? 'stop' : 'play'} disabled={!!busy || !quickPack} title="Der Sound, der jetzt an dieser Stelle in deiner Vorlage steckt" onClick={playOriginal}>Original</Button>
       <span className="small muted grow">1 : 1 wie deine Datei – Länge, Abtastrate und Lautstärke bleiben, nur Mono wie im Spiel.</span>
+      {editing && <SoundEditorOverlay entryId={editing.id} onClose={() => setEditing(null)} onSaved={(id) => { editing.put(id); setEditing(null); setEditRev((n) => n + 1); }} />}
       {needBase && !quickPack && <div style={{ width: '100%' }}><div className="qp-label">Einmalig: ein Soundpack als Vorlage</div><BasePicker autoSearch={false} /></div>}
       {inGame && (!inGame.info.fits || inGame.info.monoLossDb < -6) && (
         <div className="callout small" style={{ width: '100%', marginTop: 8 }}><Icon name="alert" size={16} /><div>
