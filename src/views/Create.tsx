@@ -241,6 +241,9 @@ export function CreateView() {
     return { id: rel[k], put: (n) => setReload((r) => (r.mode === 'single' ? { ...r, single: { ...r.single, [k]: n } } : { ...r, whole: { ...(r.whole ?? {}), [k]: n } })) };
   };
   // "Original": the sound that sits in the template at that place now – to compare with yours
+  // is there a template sound at this place at all? (no: weapon / part not mapped yet, or missing in the template)
+  const origItem = quickPack && (cur || step === RELOAD_STEP) ? gameItem(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack)) : undefined;
+  const origMissing = !!quickPack && !!origItem && origItem.status !== 'ready';
   const playOriginal = () => {
     const key = 'ingame:original';
     if (engine.playingKey === key) { engine.stop(); return; }
@@ -249,7 +252,7 @@ export function CreateView() {
     const it = gameItem(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack));
     const t = it?.status === 'ready' ? it.targets[0] : undefined;
     const st = t && quickPack.groups[t.group].awc.streams.find((x) => x.id === t.stream);
-    if (!st) { toast('info', 'Kein Original zum Vergleich', 'Diesen Sound gibt es in deiner Vorlage nicht.'); return; }
+    if (!st) { toast('info', 'Kein Original zum Vergleich', it?.status === 'unmapped' ? `Für ${it.weaponLabel} · ${it.slotLabel} weiß SP Tool noch nicht, welche Datei GTA abspielt – der Suchtest im Spiel (Test im Spiel) findet sie.` : 'Diesen Sound gibt es in deiner Vorlage nicht.'); return; }
     engine.setVolume(getState().settings.volume);
     engine.play(streamToAudio(st), { key });
   };
@@ -266,7 +269,7 @@ export function CreateView() {
     <div className="create-ingame">
       <Button size="sm" icon={playing && inGame && playing === inGame.key ? 'stop' : 'gamepad'} disabled={!!busy} onClick={() => void playInGame()}>So klingt es im Spiel</Button>
       <Button size="sm" icon="wave" disabled={!!busy || !editTarget()} title="Diesen Sound kürzen, lauter/leiser machen, Effekte … – das Original bleibt unverändert" onClick={() => { engine.stop(); setEditing(editTarget()); }}>Bearbeiten</Button>
-      <Button size="sm" variant="ghost" icon={playing === 'ingame:original' ? 'stop' : 'play'} disabled={!!busy || !quickPack} title="Der Sound, der jetzt an dieser Stelle in deiner Vorlage steckt" onClick={playOriginal}>Original</Button>
+      <Button size="sm" variant="ghost" icon={playing === 'ingame:original' ? 'stop' : 'play'} disabled={!!busy || !quickPack || origMissing} title={origMissing ? (origItem!.status === 'unmapped' ? `Noch unbekannt, welche Datei GTA für ${origItem!.weaponLabel} · ${origItem!.slotLabel} abspielt – der Suchtest im Spiel findet sie` : 'Diesen Sound gibt es in deiner Vorlage nicht') : 'Der Sound, der jetzt an dieser Stelle in deiner Vorlage steckt'} onClick={playOriginal}>Original</Button>
       <span className="small muted grow">1 : 1 wie deine Datei – Länge, Abtastrate und Lautstärke bleiben, nur Mono wie im Spiel.</span>
       {editing && <SoundEditorOverlay entryId={editing.id} onClose={() => setEditing(null)} onSaved={(id) => { editing.put(id); setEditing(null); setEditRev((n) => n + 1); }} />}
       {needBase && !quickPack && <div style={{ width: '100%' }}><div className="qp-label">Einmalig: ein Soundpack als Vorlage</div><BasePicker autoSearch={false} /></div>}
