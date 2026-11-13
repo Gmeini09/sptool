@@ -2,7 +2,7 @@
 // Finds it on the PC by itself, takes ZIPs and .rpf files by drag & drop, and remembers it for every later build.
 import { useEffect, useRef, useState } from 'react';
 import { toast } from '../app/store';
-import { adoptBase, adoptOriginal, baseFromUserFiles, baseInfo, forgetBase, isOriginalPack, ORIGINAL_LABEL, originalFromGta, restoreBase, ensureBase, searchCandidates } from '../projects/basePack';
+import { adoptBase, adoptOriginal, baseFromUserFiles, baseInfo, findOriginalFiles, forgetBase, isOriginalPack, ORIGINAL_LABEL, restoreBase, ensureBase, searchCandidates } from '../projects/basePack';
 import { getBasePack, onBasePack } from '../projects/build';
 import { readBaseCandidate, type BaseCandidate } from '../services/install';
 import { nativeInfo } from '../services/native';
@@ -75,9 +75,9 @@ export function BasePicker({ autoSearch = true }: { autoSearch?: boolean }) {
 
   // the original GTA V soundpack (Rockstar's files) as template – from the GTA V folder or dropped here
   const useOriginal = async () => {
-    setBusy('Original-Soundpack wird aus dem GTA-V-Ordner gelesen…');
+    setBusy('Original-Soundpack wird gesucht…');
     try {
-      await adoptOriginal(await originalFromGta());
+      await adoptOriginal(await findOriginalFiles());
       toast('success', 'Original-GTA-Soundpack ist die Vorlage', '„Original behalten“ klingt jetzt wie in GTA V – alles, was du nicht änderst, bleibt original.');
     } catch (e) { toast('error', 'Original ging nicht', e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }
@@ -87,9 +87,9 @@ export function BasePicker({ autoSearch = true }: { autoSearch?: boolean }) {
       <Icon name="shield" size={18} />
       <div className="grow" style={{ minWidth: 0 }}>
         <b>Original-GTA-Soundpack als Vorlage</b>
-        <div className="small muted">Zieh die Original-Dateien von GTA V hier rein (WEAPONS_PLAYER.rpf + RESIDENT.rpf, auch als ZIP){native ? ' oder nimm sie direkt aus deinem GTA-V-Ordner' : ' – dazu einmal deine GTA5.exe'}. Dann klingt „Original behalten“ wie im Spiel.</div>
+        <div className="small muted">Zieh die Original-Dateien von GTA V hier rein (WEAPONS_PLAYER.rpf + RESIDENT.rpf, auch als ZIP){native ? ' – oder klick „Auf PC suchen“: SP Tool nimmt sie aus dem GTA-V-Ordner oder findet sie in Downloads, Desktop, Dokumente' : ' – dazu einmal deine GTA5.exe'}. Dann klingt „Original behalten“ wie im Spiel.</div>
       </div>
-      {native && <Button size="sm" icon="download" disabled={!!busy} onClick={() => void useOriginal()}>Aus GTA-Ordner</Button>}
+      {native && <Button size="sm" icon="download" disabled={!!busy} onClick={() => void useOriginal()}>Auf PC suchen</Button>}
     </div>
   );
 
@@ -108,7 +108,7 @@ export function BasePicker({ autoSearch = true }: { autoSearch?: boolean }) {
           <b>Basis-Pack eingerichtet{info?.label ? `: ${info.label}` : ''}</b>
           <div className="small muted">{base.names.join(' + ')}{info ? ` · ${info.source} · ${info.containers} Sound-Container` : ''} · wird bei jedem Bauen automatisch verwendet</div>
         </div>
-        {info?.label !== ORIGINAL_LABEL && native && <Button size="sm" variant="ghost" icon="shield" disabled={!!busy} title="Rockstars Original-Soundpack aus deinem GTA-V-Ordner als Vorlage nehmen" onClick={() => void useOriginal()}>{busy ?? 'Original GTA nehmen'}</Button>}
+        {info?.label !== ORIGINAL_LABEL && native && <Button size="sm" variant="ghost" icon="shield" disabled={!!busy} title="Rockstars Original-Soundpack (GTA-V-Ordner, Downloads …) als Vorlage nehmen" onClick={() => void useOriginal()}>{busy ?? 'Original GTA nehmen'}</Button>}
         <Button size="sm" variant="ghost" icon="refresh" disabled={!!busy} onClick={() => { void forgetBase(); setFound(null); }}>Anderes wählen</Button>
         {picker}
       </div>

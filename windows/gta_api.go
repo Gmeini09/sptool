@@ -48,7 +48,14 @@ func findAwcKey(exe []byte) []byte {
 func gtaAPI(w http.ResponseWriter, r *http.Request) bool {
 	switch r.URL.Path {
 	case "/native/gta/awckey":
-		for _, d := range gtaDirs(r) {
+		// the GTA V folders first, then a copied GTA5.exe in Downloads / on the desktop
+		dirs := gtaDirs(r)
+		if home, err := os.UserHomeDir(); err == nil {
+			for _, sub := range []string{"Downloads", "Desktop", filepath.Join("OneDrive", "Downloads"), filepath.Join("OneDrive", "Desktop"), filepath.Join("OneDrive", "Schreibtisch")} {
+				dirs = append(dirs, filepath.Join(home, sub))
+			}
+		}
+		for _, d := range dirs {
 			exe, err := os.ReadFile(filepath.Join(d, "GTA5.exe"))
 			if err != nil {
 				continue

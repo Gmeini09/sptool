@@ -7,7 +7,7 @@ import { loadJSON, saveJSON, getBlob, putBlob, deleteBlob, removeKey } from '../
 import { logger } from '../services/logger';
 import { openPack, type Pack } from '../formats/pack';
 import { readRpfHeader } from '../formats/rpf';
-import { findGtaKey, hasGtaKey, NeedGtaKeyError, originalArchive, setGtaKey } from '../formats/gtaOriginal';
+import { findGtaKey, hasGtaKey, NeedGtaKeyError, ORIGINAL_SIZES, originalArchive, setGtaKey } from '../formats/gtaOriginal';
 import { listZip, readZipEntry } from '../formats/zip';
 import { loadMapping } from '../formats/mapping';
 import { WEAPON_PROFILES } from '../weapons/profiles';
@@ -128,6 +128,37 @@ export async function originalFromGta(): Promise<BaseFile[]> {
   return files;
 }
 
+/** A found soundpack that is Rockstar's original (both archives, original sizes). */
+export const isOriginalCandidate = (c: BaseCandidate) => ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf'].every((n) => c.files.some((f) => f.name.toLowerCase() === n.toLowerCase() && f.size === ORIGINAL_SIZES[n]));
+
+const ORIGINAL_TRIED = 'sptool:original-tried-2';
+/**
+ * The original GTA V soundpack is the template whenever it is on this PC (Windows app): from the GTA V folder, else
+ * from wherever the PC search finds it (e.g. Downloads). Runs on start; quiet when there is none (checked once a day).
+ * Returns true when it switched to the original.
+ */
+export async function preferOriginal(): Promise<boolean> {
+  if (baseInfo()?.label === ORIGINAL_LABEL && getBasePack()) return false;
+  if (!(await nativeInfo().catch(() => null))) return false;
+  const last = loadJSON<number>(ORIGINAL_TRIED, 0);
+  if (Date.now() - last < 86_400_000 && baseInfo()) return false;
+  saveJSON(ORIGINAL_TRIED, Date.now());
+  const files = await findOriginalFiles().catch(() => null);
+  if (!files) return false;
+  try { await adoptOriginal(files); } catch (e) { logger.warn(`Original-GTA-Soundpack gefunden, aber nicht nutzbar: ${e instanceof Error ? e.message : String(e)}`); return false; }
+  removeKey(ORIGINAL_TRIED);
+  return true;
+}
+
+/** The original archives on this PC: from the GTA V folder, else wherever the PC search finds them (e.g. Downloads). */
+export async function findOriginalFiles(): Promise<BaseFile[]> {
+  try { return await originalFromGta(); } catch (e) { if (!(await nativeInfo().catch(() => null))) throw e; }
+  const c = (await searchCandidates(0).catch(() => [] as BaseCandidate[])).find(isOriginalCandidate);
+  const files = c ? await readBaseCandidate(c) : null;
+  if (!files || !isOriginalPack(files)) throw new BaseError('Das Original-GTA-Soundpack wurde auf diesem PC nicht gefunden – weder im GTA-V-Ordner noch in Downloads, Desktop oder Dokumente. Zieh WEAPONS_PLAYER.rpf + RESIDENT.rpf (Original) hier rein.');
+  return files;
+}
+
 /** Uses Rockstar's original soundpack as template ("Original behalten" then sounds like GTA V). */
 export async function adoptOriginal(files: BaseFile[], dropped: File[] = []): Promise<Pack> {
   await ensureGtaKey(dropped);
@@ -156,7 +187,8 @@ export async function baseFromUserFiles(list: File[]): Promise<{ files: BaseFile
 export function rankCandidates(list: BaseCandidate[]): BaseCandidate[] {
   // a complete pack (WEAPONS_PLAYER + RESIDENT) always beats an incomplete one – otherwise a mods folder with only
   // WEAPONS_PLAYER.rpf became the template and every soundpack came out without RESIDENT.rpf
-  const score = (c: BaseCandidate) => (isComplete(c) ? 4 : 0) + (c.source.startsWith('FiveM') ? 2 : 0);
+  // Rockstar's original first: "Original behalten" then really is GTA V
+  const score = (c: BaseCandidate) => (isOriginalCandidate(c) ? 8 : 0) + (isComplete(c) ? 4 : 0) + (c.source.startsWith('FiveM') ? 2 : 0);
   // never the in-game test pack (beeps) as a template
   return list.filter((c) => !/zuordnungstest/i.test(c.path)).sort((a, b) => score(b) - score(a) || b.modified - a.modified);
 }

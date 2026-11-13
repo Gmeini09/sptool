@@ -59,6 +59,9 @@ const ORIGINAL: OriginalArchive[] = [
   ] },
 ];
 
+/** Byte size of each original archive – to recognise them in a file list before reading them. */
+export const ORIGINAL_SIZES: Record<string, number> = Object.fromEntries(ORIGINAL.map((a) => [a.name, a.size]));
+
 const AWC_KEY_SHA1 = 'c31e0da1c7e5d85502e517290ed07b180a94e911';
 const KEY_STORE = 'sptool:gta-awc-key';
 

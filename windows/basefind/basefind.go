@@ -115,6 +115,13 @@ func hasSounds(r io.Reader, limit int64) bool {
 	return false
 }
 
+// originalSizes: Rockstar's original archives (GTA V x64/audio/sfx). Their sounds are encrypted, yet SP Tool can use
+// them as template with the key from the player's GTA5.exe (src/formats/gtaOriginal.ts) – so they are candidates too.
+var originalSizes = map[string]int64{"WEAPONS_PLAYER.rpf": 3883008, "RESIDENT.rpf": 112785408}
+
+// IsOriginal reports whether a file is (by name and exact size) one of the original game archives.
+func IsOriginal(canonical string, size int64) bool { return originalSizes[canonical] == size }
+
 func fileHasSounds(p string) bool {
 	f, err := os.Open(p)
 	if err != nil {
@@ -170,7 +177,7 @@ func Search(roots []Root, limit int) []Candidate {
 				}
 				return nil
 			}
-			if cn := Canonical(d.Name()); cn != "" && info.Size() < maxRpf && fileHasSounds(p) {
+			if cn := Canonical(d.Name()); cn != "" && info.Size() < maxRpf && (IsOriginal(cn, info.Size()) || fileHasSounds(p)) {
 				dir := filepath.Dir(p)
 				dirs[dir] = append(dirs[dir], File{Name: cn, Size: info.Size(), path: p})
 				if t := info.ModTime().Unix(); t > dirMod[dir+"|"+cn] {

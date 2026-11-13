@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { Tour } from '../components/Tour';
 import { GameTest } from '../views/GameTest';
 import { CreateView } from '../views/Create';
-import { adoptBase, baseArchiveName, baseFromUserFiles, restoreBase } from '../projects/basePack';
+import { adoptBase, adoptOriginal, baseArchiveName, baseFromUserFiles, isOriginalPack, preferOriginal, restoreBase } from '../projects/basePack';
 import { checkForUpdate } from '../services/appUpdate';
 import { refreshServerMapping } from '../services/mappingSync';
 import { flushDetectionFeedback } from '../services/detectionFeedback';
@@ -93,11 +93,12 @@ export function App() {
   }, [canUpdate]);
   // the stored base pack (WEAPONS_PLAYER/RESIDENT) is loaded once the app is unlocked
   const unlocked = acc.phase === 'ready' && hasAccess(acc);
-  useEffect(() => { if (unlocked) void restoreBase(); }, [unlocked]);
+  // … and the original GTA V soundpack becomes the template as soon as it is on this PC
+  useEffect(() => { if (unlocked) void restoreBase().then(() => preferOriginal()).then((ok) => { if (ok) toast('success', 'Original-GTA-Soundpack ist die Vorlage', '„Original behalten“ klingt jetzt wie in GTA V.'); }).catch(() => {}); }, [unlocked]);
   // drop a soundpack ZIP or WEAPONS_PLAYER/RESIDENT.rpf anywhere → it becomes the base pack
   useEffect(() => {
     if (!unlocked) return;
-    const isPack = (f: File) => /\.zip$/i.test(f.name) || !!baseArchiveName(f.name);
+    const isPack = (f: File) => /\.zip$/i.test(f.name) || !!baseArchiveName(f.name) || /^gta5\.exe$/i.test(f.name);
     const over = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
     const drop = (e: DragEvent) => {
       if (e.defaultPrevented) return; // handled by the page (e.g. WAV import in the library)
@@ -112,8 +113,11 @@ export function App() {
         if (!ev.detail.taken) toast('info', 'Wohin damit?', AUDIO_EXT.test(all[0].name) ? 'Zieh Sounds auf „Eigene Sounds importieren“ (Soundpack erstellen) oder in die Bibliothek.' : 'SP Tool nimmt Sounds (MP3, WAV …), Soundpack-ZIPs und WEAPONS_PLAYER/RESIDENT.rpf.');
         return;
       }
-      void baseFromUserFiles(files).then(({ files: f, label }) => adoptBase(f, 'Deine Datei', label))
-        .then(() => toast('success', 'Basis-Pack eingerichtet', 'Wird ab jetzt bei jedem Bauen automatisch verwendet.'), (err) => toast('error', 'Diese Dateien passen nicht', err instanceof Error ? err.message : String(err)));
+      void baseFromUserFiles(files).then(async ({ files: f, label }) => {
+        if (isOriginalPack(f)) { await adoptOriginal(f, files); return 'Original-GTA-Soundpack ist die Vorlage – „Original behalten“ klingt jetzt wie in GTA V.'; }
+        await adoptBase(f, 'Deine Datei', label);
+        return 'Wird ab jetzt bei jedem Bauen automatisch verwendet.';
+      }).then((msg) => toast('success', 'Basis-Pack eingerichtet', msg), (err) => toast('error', 'Diese Dateien passen nicht', err instanceof Error ? err.message : String(err)));
     };
     window.addEventListener('dragover', over);
     window.addEventListener('drop', drop);
