@@ -8,7 +8,8 @@ Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version
 
 ## 1.10.12 – 28.10.2026
 - Soundpack erstellen: „So klingt es im Spiel“ spielt deinen Sound genau so, wie er in die Spieldatei kommt
-- Soundpack erstellen: Neuer Knopf „Bearbeiten“ öffnet deinen gewählten Schuss oder Reload direkt im Editor (kürzen, Lautstärke, Effekte …) – „Speichern und übernehmen“ setzt die bearbeitete Version ein, das Original bleibt unverändert
+- Soundpack erstellen: Neuer Knopf „Bearbeiten“ öffnet deinen gewählten Schuss oder Reload direkt im Editor (kürzen, Lautstärke, Effekte …) – „Speichern und übernehmen“ legt einen neuen Sound an (z. B. „Turbo 37 bearbeitet“), setzt ihn ein und zeigt ihn oben in der Liste – das Original bleibt unverändert
+- Behoben: Ein bearbeiteter Turbo-Sound klang wie das Original (die Änderungen gingen verloren); Turbo-Sounds werden außerdem mit ihrer eigenen Abtastrate geladen
 - Schon vor dem Erstellen siehst du, wenn ein Sound nicht in die Vorlage passt (und um wie viele Sekunden) oder in Mono dünner wird
 - Neuer Knopf „Alle importierten löschen“ leert die Liste deiner importierten Schüsse – Sounds aus gespeicherten Soundpacks bleiben dort erhalten
 - Nachladen: Die alten Reload-Vorlagen sind raus – neu sind 4 freie Reload-Sounds aus dem Internet (CC0, gemeinfrei), oder du nimmst deinen eigenen

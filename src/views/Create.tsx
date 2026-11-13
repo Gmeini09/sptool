@@ -388,8 +388,11 @@ export function CreateView() {
 
   const stepOk = (i: number) => i < WEAPONS.length ? !!fire[WEAPONS[i]] : true;
   const reachable = (i: number) => Array.from({ length: i }, (_, k) => k).every(stepOk);
-  const fireLib = (w: WeaponId) => { const all = featuredFirst(entriesFor(lib, w, 'fire').filter((e) => e.source !== 'imported')); const s = style === 'all' ? all : style === 'featured' ? all.filter((e) => e.featured) : all.filter((e) => e.style === style); return s.length ? s : all; };
+  const fireLib = (w: WeaponId) => { const all = featuredFirst(entriesFor(lib, w, 'fire').filter((e) => e.source !== 'imported' && e.source !== 'edit')); const s = style === 'all' ? all : style === 'featured' ? all.filter((e) => e.featured) : all.filter((e) => e.style === style); return s.length ? s : all; };
   const imported = (w: WeaponId) => entriesFor(lib, w, 'fire').filter((e) => e.source === 'imported' && !e.hidden);
+  // own sounds of this step: imported and edited ("Turbo 37 bearbeitet"), newest first
+  const ownFire = (w: WeaponId) => [...entriesFor(lib, w, 'fire').filter((e) => e.source === 'edit' && !e.hidden).sort((a, b) => b.createdAt - a.createdAt), ...imported(w)];
+  const editedReloads = () => lib.filter((e) => e.source === 'edit' && e.type === 'reload' && !e.hidden).sort((a, b) => b.createdAt - a.createdAt);
   // clears the whole import list of this weapon; whatever pointed at one goes back to "nothing chosen".
   // A sound a saved soundpack still uses only leaves the list (deleting it would break that pack), the rest is deleted.
   const clearImported = (w: WeaponId) => {
@@ -509,7 +512,7 @@ export function CreateView() {
               <span className="grow"><b>Original behalten</b> <span className="faint small">– kein neuer Schuss, im Spiel bleibt der GTA-Sound</span></span>
               {fire[cur] === ORIGINAL && <span className="chip ok"><Icon name="check" size={12} />gewählt</span>}
             </div>
-            {imported(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra="importiert" onPick={() => { pickFire(cur, e.id); void previewEntry(e); }} />)}
+            {ownFire(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : 'importiert'} onPick={() => { pickFire(cur, e.id); void previewEntry(e); }} />)}
           </div>
           {imported(cur).length > 0 && (
             <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -592,9 +595,9 @@ export function CreateView() {
             )}
             <div className="qp-label" style={{ marginTop: 14 }}>Oder ein freier Reload-Sound (CC0, aus dem Internet)</div>
             <div className="create-list compact">
-              {freeReloads().map((e) => {
+              {[...editedReloads(), ...freeReloads()].map((e) => {
                 const sel = !reload.split && reload.whole?.mag_out === e.id;
-                return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={`von ${e.creator}`} onPick={() => { setReload((r) => ({ ...r, split: false, whole: { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE } })); void previewEntry(e); }} />;
+                return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : `von ${e.creator}`} onPick={() => { setReload((r) => ({ ...r, split: false, whole: { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE } })); void previewEntry(e); }} />;
               })}
             </div>
           </>}

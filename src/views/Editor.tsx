@@ -240,10 +240,11 @@ function EditorSession({ entry, embedded }: { entry: LibraryEntry; embedded?: { 
       embedded?.onSaved(entry.id);
     } else {
       const id = newId('edit');
-      const name = `${entry.name} (bearbeitet)`;
+      const name = `${entry.name} bearbeitet`; // e.g. "Turbo 37 bearbeitet" – a sound of its own, the original stays
       addUserEntry({
         ...entry, id, name, source: 'edit', creator: 'Du', createdAt: Date.now(), sourceInfo: `Bearbeitung von ${entry.name}`,
-        synth: undefined, blobKey: undefined, edit: { baseId: entry.id, state, markers }, tags: [...entry.tags, 'edited'],
+        synth: undefined, blobKey: undefined, asset: undefined, featured: undefined, hidden: undefined,
+        edit: { baseId: entry.id, state, markers }, tags: [...entry.tags, 'edited'],
       });
       toast('success', 'Als neuer Sound gespeichert', `${name} – das Original bleibt unverändert.`);
       notify('Bearbeiteter Sound gespeichert', name);

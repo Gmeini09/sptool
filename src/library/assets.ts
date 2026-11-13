@@ -29,7 +29,6 @@ export function allEntries(): LibraryEntry[] {
   return [...getState().userEntries, ...turboCatalog(), ...freeReloads()];
 }
 
-let decodeCtx: OfflineAudioContext | null = null;
 const byIdCache = new Map<string, LibraryEntry>();
 // Former built-in sounds are no longer listed anywhere, but soundpacks and edits made with them keep working.
 export function entryById(id: string): LibraryEntry | undefined {
@@ -53,13 +52,34 @@ function storeMeta(id: string, r: Rendered) {
   if (!metaSaveTimer) metaSaveTimer = setTimeout(() => { metaSaveTimer = null; saveJSON(META_KEY, meta); }, 1500);
 }
 
+/** Sample rate stored in an Ogg file (Vorbis id header; Opus always plays at 48 kHz), or null. */
+function oggRate(b: Uint8Array): number | null {
+  if (b.length < 44 || b[0] !== 0x4f || b[1] !== 0x67 || b[2] !== 0x67 || b[3] !== 0x53) return null; // "OggS"
+  const head = String.fromCharCode(...b.subarray(28, 36));
+  if (head === 'OpusHead') return 48000;
+  if (head.slice(1, 7) === 'vorbis') return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(40, true) || null;
+  return null;
+}
+
+const decodeCtxs = new Map<number, OfflineAudioContext>();
 async function produce(e: LibraryEntry): Promise<Rendered> {
+  // an edit first: an edited built-in sound must never fall back to its original file
+  if (e.edit) {
+    const base = entryById(e.edit.baseId);
+    if (!base) throw new Error(`Der Original-Sound für „${e.name}“ existiert nicht mehr.`);
+    const src = await getAudio(base);
+    return audioWorker.render(src, e.edit.state);
+  }
   if (e.synth) return audioWorker.synth(e.synth);
   if (e.asset) {
     const res = await fetch(e.asset);
     if (!res.ok) throw new Error(`Der Sound „${e.name}“ konnte nicht geladen werden (${res.status}).`);
-    decodeCtx ??= new OfflineAudioContext(1, 1, 48000);
-    const buf = await decodeCtx.decodeAudioData(await res.arrayBuffer());
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // decoded at the file's own rate – the sound stays 1 : 1 (a fixed 48 kHz context would resample it)
+    const rate = oggRate(bytes) ?? 48000;
+    let ctx = decodeCtxs.get(rate);
+    if (!ctx) { ctx = new OfflineAudioContext(1, 1, rate); decodeCtxs.set(rate, ctx); }
+    const buf = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
     const channels = Array.from({ length: Math.min(2, buf.numberOfChannels) }, (_, i) => new Float32Array(buf.getChannelData(i)));
     return audioWorker.package({ sampleRate: buf.sampleRate, channels });
   }
@@ -67,12 +87,6 @@ async function produce(e: LibraryEntry): Promise<Rendered> {
     const bytes = await getBlob(e.blobKey);
     if (!bytes) throw new Error(`Die importierte Audiodatei für „${e.name}“ fehlt im lokalen Speicher.`);
     return audioWorker.decode(bytes);
-  }
-  if (e.edit) {
-    const base = entryById(e.edit.baseId);
-    if (!base) throw new Error(`Der Original-Sound für „${e.name}“ existiert nicht mehr.`);
-    const src = await getAudio(base);
-    return audioWorker.render(src, e.edit.state);
   }
   throw new Error(`Der Sound „${e.name}“ hat keine Audioquelle.`);
 }
