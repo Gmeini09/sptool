@@ -30,8 +30,9 @@ export function indexPack(pack: Pack): Map<string, number[]> {
 }
 
 /**
- * Sounds GTA plays from the same file: the Pistol MK2 fires the Pistol's shot (ptl_pistol.awc – heard in the original
- * template; the game only changes pitch and tone per weapon). Used when the slot has no mapping of its own.
+ * Sounds GTA most likely plays from the same file: the Pistol MK2 fires the Pistol's shot (ptl_pistol.awc – it sounds
+ * like it; not confirmed in the game yet). Used when the slot has no mapping of its own and the other weapon has no
+ * different sound there.
  */
 export const SAME_SOUND: Record<string, { weapon: WeaponProfile['id']; slot: string }> = {
   'pistol_mk2:fire': { weapon: 'pistol', slot: 'fire' },
@@ -46,7 +47,11 @@ export function planBuild(project: Project, profiles: WeaponProfile[], mapping: 
       const a = slots[s.id];
       if (!a) continue;
       const own = streamsFor(mapping, prof.id, s.id), alias = SAME_SOUND[`${prof.id}:${s.id}`];
-      const mapped = own.length || !alias ? own : streamsFor(mapping, alias.weapon, alias.slot);
+      // the shared file is used only while the other weapon has no different sound of its own there (not confirmed
+      // in the game yet – the other weapon keeps its sound, this one stays without effect until the test finds a file)
+      const other = alias && project.weapons[alias.weapon]?.[alias.slot];
+      const useAlias = !!alias && !own.length && (!other || other.entryId === a.entryId);
+      const mapped = useAlias ? streamsFor(mapping, alias!.weapon, alias!.slot) : own;
       const targets: BuildTarget[] = [];
       for (const m of mapped) for (const gi of idx.get(m.file) ?? []) {
         if (pack!.groups[gi].awc.streams.some((st) => st.id === m.stream)) targets.push({ group: gi, stream: m.stream });

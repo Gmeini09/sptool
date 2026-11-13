@@ -242,14 +242,19 @@ export function CreateView() {
   };
   // "Original": the sound that sits in the template at that place now – to compare with yours
   // is there a template sound at this place at all? (no: weapon / part not mapped yet, or missing in the template)
-  const origItem = quickPack && (cur || step === RELOAD_STEP) ? gameItem(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack)) : undefined;
+  // the template sound at this place – for a weapon that shares a file (MK2 → Pistol) the shared one
+  const origOf = (p: BuildPlan): PlanItem | undefined => {
+    const it = gameItem(p), alias = it && SAME_SOUND[`${it.weapon}:${it.slot}`];
+    return it && it.status !== 'ready' && alias ? p.items.find((o) => o.weapon === alias.weapon && o.slot === alias.slot && o.status === 'ready') ?? it : it;
+  };
+  const origItem = quickPack && (cur || step === RELOAD_STEP) ? origOf(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack)) : undefined;
   const origMissing = !!quickPack && !!origItem && origItem.status !== 'ready';
   const playOriginal = () => {
     const key = 'ingame:original';
     if (engine.playingKey === key) { engine.stop(); return; }
     engine.unlock();
     if (!quickPack) { toast('info', 'Noch keine Vorlage', 'Hör zuerst „So klingt es im Spiel“ an – dabei wird die Vorlage gesucht.'); return; }
-    const it = gameItem(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack));
+    const it = origOf(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack));
     const t = it?.status === 'ready' ? it.targets[0] : undefined;
     const st = t && quickPack.groups[t.group].awc.streams.find((x) => x.id === t.stream);
     if (!st) { toast('info', 'Kein Original zum Vergleich', it?.status === 'unmapped' ? `Für ${it.weaponLabel} · ${it.slotLabel} weiß SP Tool noch nicht, welche Datei GTA abspielt – der Suchtest im Spiel (Test im Spiel) findet sie.` : 'Diesen Sound gibt es in deiner Vorlage nicht.'); return; }
@@ -540,16 +545,12 @@ export function CreateView() {
           {cur && SAME_SOUND[`${cur}:fire`] && (() => {
             const other = SAME_SOUND[`${cur}:fire`].weapon as WeaponId, mine = fire[cur], theirs = fire[other];
             const both = !!mine && mine !== ORIGINAL && !!theirs && theirs !== ORIGINAL && mine !== theirs;
-            return (
-              <div className={`callout small${both ? ' danger' : ''}`} style={{ marginTop: 12 }}><Icon name={both ? 'alert' : 'info'} size={16} /><div>
-                <b>Die {label(cur)} hat in GTA denselben Schuss wie die {label(other)}</b> (das Spiel ändert nur Tonhöhe und Klang etwas).{' '}
-                {both ? <>Du hast zwei verschiedene Sounds gewählt – im Spiel kann nur einer kommen. Wähl hier denselben Sound wie bei der {label(other)} oder „Original behalten“.</>
-                  : mine && mine !== ORIGINAL ? <>Dein Sound hier gilt im Spiel auch für die {label(other)}.</>
-                  : theirs && theirs !== ORIGINAL ? <>Dein Sound der {label(other)} gilt im Spiel auch für die {label(cur)}.</> : null}
-              </div></div>
-            );
+            const text = both ? <>Bis der <b>Test im Spiel</b> zeigt, ob die {label(cur)} eine eigene Datei hat, nutzt sie den Schuss der {label(other)}. Dort hast du schon einen anderen Sound – der bleibt; dein {label(cur)}-Sound wird mit gespeichert und wirkt nach dem Test.</>
+              : mine && mine !== ORIGINAL ? <>Die {label(cur)} nutzt vermutlich denselben Schuss wie die {label(other)} (noch nicht im Spiel getestet) – dein Sound gilt dann auch für die {label(other)}.</>
+              : theirs && theirs !== ORIGINAL ? <>Die {label(cur)} nutzt vermutlich denselben Schuss wie die {label(other)} (noch nicht im Spiel getestet) – dein {label(other)}-Sound gilt dann auch für die {label(cur)}.</> : null;
+            return text && <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div className="grow">{text}</div>{both && <Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button>}</div>;
           })()}
-          {fire[cur] && fire[cur] !== ORIGINAL && fireStatus(cur) && !ok(fireStatus(cur)!) && (
+          {fire[cur] && fire[cur] !== ORIGINAL && fireStatus(cur) && !ok(fireStatus(cur)!) && !SAME_SOUND[`${cur}:fire`] && (
             fireStatus(cur)!.status === 'not-in-base'
               ? <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div>Deine Vorlage enthält den Schuss der {label(cur)} nicht. Nimm als Vorlage ein Soundpack, das die {label(cur)} auch ändert – dann wirkt dein Sound im Spiel.</div></div>
               : <div className="callout small" style={{ marginTop: 12 }}><Icon name="gamepad" size={16} /><div className="grow">Wird mit gespeichert, wirkt im Spiel aber erst, wenn SP Tool weiß, welcher GTA-Sound der Schuss der {label(cur)} ist. Das findest du mit dem <b>Test im Spiel</b> in zwei Minuten heraus (einmal schießen, Pieptöne zählen) – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>

@@ -69,12 +69,12 @@ test('shipped mapping: Pistol and .50 shots are written; the MK2 shares the Pist
   let p = newProject('t', 'x');
   for (const w of ['pistol', 'pistol_mk2', 'pistol50'] as const) p = assign(p, w, 'fire', { entryId: w });
   let plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:ready', 'pistol50:ready']);
-  assert.deepEqual(plan.items[1].targets, plan.items[0].targets, 'MK2 = Pistol file');
-  // two different sounds for one GTA sound: SP Tool says so instead of picking one
-  await assert.rejects(runBuild(plan, pack, async () => tone(0.2)), /Pistol und Pistol MK2 benutzen in GTA denselben Sound/);
+  assert.deepEqual(plan.items.map((i) => `${i.weapon}:${i.status}`), ['pistol:ready', 'pistol_mk2:unmapped', 'pistol50:ready']);
+  // different sounds: the Pistol keeps its file, the MK2 waits for the in-game test (no error, nothing overwritten)
+  assert.equal(plan.items[1].status, 'unmapped');
   p = assign(p, 'pistol_mk2', 'fire', { entryId: 'pistol' });
   plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  assert.deepEqual(plan.items[1].targets, plan.items[0].targets, 'same sound: MK2 = Pistol file');
   const r = await runBuild(plan, pack, async (a) => tone(0.2, a.entryId === 'pistol50' ? 110 : 330));
   const out = openPack(r.outputs);
   assert.notDeepEqual(streamOf(out, 'F04', 369994369)[0].data, streamOf(pack, 'F04', 369994369)[0].data, 'F04 written');
