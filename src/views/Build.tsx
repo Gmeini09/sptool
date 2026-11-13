@@ -111,11 +111,6 @@ export function BuildView() {
         <div className="panel inst-done">
           <div className="panel-body">
             <div className="row"><DoneMark /><div className="grow"><b>Gebaut: {result.outputs.map((o) => o.name).join(' + ')}</b><div className="small muted">{result.replacedStreams} Spielsounds ersetzt · {result.outputs.map((o) => `${o.name} ${fmtSize(o.bytes.byteLength)}`).join(' · ')}</div></div></div>
-            {(result.truncated.length > 0 || result.padded.length > 0 || (result.lowered ?? []).length > 0) && <div className="small muted" style={{ marginTop: 8 }}>
-              {result.truncated.length > 0 && <div>Mit Ausblenden auf die Originallänge gekürzt: {result.truncated.join(', ')}</div>}
-              {result.padded.length > 0 && <div>Mit Stille auf die Originallänge aufgefüllt: {result.padded.join(', ')}</div>}
-              {(result.lowered ?? []).length > 0 && <div>In etwas niedrigerer Qualität gespeichert, damit mehr von der Länge reinpasst: {result.lowered.join(', ')}</div>}
-            </div>}
             <div className="row" style={{ marginTop: 12, gap: 8 }}>
               <Button variant="primary" icon="download" onClick={async () => { try { const s = await saveToDownloads(project.name, result.outputs.map((o) => ({ name: o.name, bytes: o.bytes }))); toast('success', 'Als ZIP gespeichert', `${s.zip} ${s.dir ? 'liegt in Downloads › SP Tool' : 'liegt in deinem Download-Ordner'} – die Dateien darin direkt in GTA V › x64 › audio › sfx ziehen (kein Unterordner), dann FiveM neu starten.`); if (s.dir) void showDownloads(); } catch (e) { toast('error', 'Speichern fehlgeschlagen', e instanceof Error ? e.message : String(e)); } }}>Als ZIP speichern</Button>
             </div>

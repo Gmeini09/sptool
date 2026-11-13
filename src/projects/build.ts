@@ -6,7 +6,7 @@
 // an old copy. Container sizes never change (see rpf.ts), so the encrypted table of contents stays valid.
 // Inside a container the streams can be laid out anew: a muted stream (SILENCE) shrinks to a few milliseconds and
 // its bytes let a longer sound – a whole reload – keep its full length (creator packs do the same).
-import { fitStreamAudio, monoMix, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
+import { monoMix, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
 import { exportPack, type Pack } from '../formats/pack';
 import { matchCatalog, streamsFor, type Mapping } from '../formats/mapping';
 import type { AudioData } from '../dsp/types';
@@ -51,8 +51,7 @@ export function planBuild(project: Project, profiles: WeaponProfile[], mapping: 
 }
 
 export interface BuildOutput { name: string; bytes: Uint8Array; patchedContainers: number }
-/** truncated: shortened (faded out) to fit · lowered: written at a lower sample rate to keep more of its length */
-export interface BuildResult { outputs: BuildOutput[]; replacedStreams: number; truncated: string[]; padded: string[]; lowered: string[] }
+export interface BuildResult { outputs: BuildOutput[]; replacedStreams: number }
 
 
 /** "Reload & Rest" of another soundpack: its archives are used as the base for one build. */
@@ -98,128 +97,53 @@ export function nothingChangesMessage(plan: BuildPlan, templateLabel: string): s
 /** Entry id that mutes a slot (the rest of a "whole reload": the other reload parts stay silent). */
 export const SILENCE = 'sptool:silence';
 
-const MIN_RATE = 11025; // below this a reload sounds like a telephone
-// a shot keeps its crack: its rate is never lowered below this (or its original rate if that is lower) – the tail is
-// faded out instead, because the first few hundred ms carry the shot and a muffled crack is worse than a shorter echo
-const SHOT_MIN_RATE = 32000;
-// a sound is written at its own rate when there is room (like a pack made by hand) – never above this
-const MAX_RATE = 48000;
-// own sounds are brought to full scale, like in a pack made by hand: creators' shots and reload parts peak at
-// 0 dBFS (median over 58 packs) – a sound left at the level of its file comes out thin and quiet in the game.
-// Only "Lautstärke wie das Original" keeps the level it matched.
-const FULL = { normalize: true } as const;
+// 1 : 1 – a sound goes into the game exactly as it is: its own sample rate, its own length, its own level.
+// SP Tool changes nothing by itself (no normalising, no resampling, no cutting). The only step the game forces is
+// mono (GTA plays these streams in mono). A sound that does not fit the template is an error the user fixes by hand.
 const KEEP = { normalize: false } as const;
+const MIN_GAME_RATE = 8000, MAX_GAME_RATE = 65535; // what an AWC stream can hold
 
-/** The first `keep` samples with a soft fade-out (last quarter, at most 120 ms) – used when a sound must be shortened. */
-function fadeTo(a: AudioData, keep: number): AudioData {
-  const n = Math.max(1, Math.min(keep, a.channels[0].length));
-  const fade = Math.max(1, Math.min(Math.round(n / 4), Math.round(a.sampleRate * 0.12)));
-  return { sampleRate: a.sampleRate, channels: a.channels.map((c) => { const o = c.slice(0, n); for (let i = 0; i < fade; i++) o[n - 1 - i] *= i / fade; return o; }) };
-}
-const seconds = (s: AwcStream) => s.format.samples / s.format.sampleRate;
-
-/** How loud a shot or click is heard: RMS of its loudest 50 ms. */
-function punch(c: Float32Array, rate: number): number {
-  const w = Math.max(1, Math.round(rate * 0.05));
-  let best = 0, sum = 0;
-  for (let i = 0; i < c.length; i++) { sum += c[i] * c[i]; if (i >= w) sum -= c[i - w] * c[i - w]; if (i >= w - 1) best = Math.max(best, sum); }
-  if (c.length < w) best = sum;
-  return Math.sqrt(Math.max(0, best) / w);
+/** Sounds that do not fit the template 1 : 1 – SP Tool never cuts or squeezes them by itself. */
+export class TooLongError extends Error {
+  constructor(public parts: Array<{ labels: string[]; overSeconds: number }>) {
+    super(`Passt nicht in die Vorlage – SP Tool kürzt und verändert deine Sounds nicht: ${parts.map((x) => `${x.labels.join(' + ')} ${x.labels.length > 1 ? 'sind zusammen' : 'ist'} ${x.overSeconds.toFixed(2).replace('.', ',')} s zu lang`).join('; ')}. Kürze den Sound selbst (Editor) oder nimm eine Vorlage mit mehr Platz.`);
+    this.name = 'TooLongError';
+  }
 }
 
-/**
- * "Lautstärke wie das Original": the sound gets the loudness of the template sound it replaces (never above full scale).
- * Many creators mute the reload parts they do not use (peak around −38 dB) – such a muted original is no reference,
- * the sound then keeps its own level instead of becoming inaudible.
- */
-function matchLevel(o: AwcStream, a: AudioData): AudioData | null {
-  const og = streamToAudio(o).channels[0];
-  let ogPeak = 0;
-  for (let i = 0; i < og.length; i++) ogPeak = Math.max(ogPeak, Math.abs(og[i]));
-  if (ogPeak < 0.1) return null; // below −20 dBFS: muted on purpose – no reference
-  const ref = punch(og, o.format.sampleRate);
-  const m = monoMix(a).mono, cur = punch(m, a.sampleRate);
-  if (ref < 1e-6 || cur < 1e-6) return null;
-  let peak = 0;
-  for (let i = 0; i < m.length; i++) peak = Math.max(peak, Math.abs(m[i]));
-  const g = Math.min(ref / cur, 1 / Math.max(peak, 1e-9));
-  return { sampleRate: a.sampleRate, channels: a.channels.map((c) => c.map((x) => x * g)) };
+/** The sound written 1 : 1 into a stream (mono, own rate, own length, own level). */
+function exactStream(o: AwcStream, audio: AudioData): AwcStream {
+  const sr = audio.sampleRate;
+  if (sr < MIN_GAME_RATE || sr > MAX_GAME_RATE) throw new Error(`Ein Sound hat ${sr} Hz – GTA kann nur ${MIN_GAME_RATE}–${MAX_GAME_RATE} Hz. Speichere die Datei z. B. mit 48000 Hz.`);
+  return replaceStreamAudio(o, audio, { ...KEEP, sampleRate: sr });
 }
 
-export interface LayoutOptions { matchLevel?: boolean }
-
-/**
- * Lays out one container: sounds that fit their stream are written exactly as before (same size); a muted stream
- * shrinks; a sound longer than its stream gets the freed bytes – at a lower sample rate if needed (not below
- * 11 kHz) – and only what still does not fit is cut off.
- */
-function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | null>, shots: Set<number> = new Set(), lo: LayoutOptions = {}): { streams: Map<number, AwcStream>; truncated: Set<number>; padded: Set<number>; lowered: Set<number> } {
+/** Lays out one container 1 : 1: muted streams shrink, every sound keeps rate, length and level. over = bytes too many. */
+function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | null>): { streams: Map<number, AwcStream>; over: number } {
   const g = pack.groups[gi];
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
-  // level: full scale, or – "Lautstärke wie das Original" – the loudness of the template sound (kept as matched)
-  const matched = new Set<number>();
-  const want = new Map([...wanted].map(([id, a]) => {
-    const m = a && lo.matchLevel ? matchLevel(orig(id), a) : null;
-    if (m) matched.add(id);
-    return [id, m ?? a] as const;
-  }));
-  const lv = (id: number) => (matched.has(id) ? KEEP : FULL);
-  const truncated = new Set<number>(), padded = new Set<number>(), lowered = new Set<number>();
-  const size = (m: Map<number, AwcStream>) => writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => m.get(s.id) ?? s) }).length;
-  // 0 · every sound at its own rate and full length – exactly what a pack made by hand holds – when the container has room
-  const own = new Map<number, AwcStream>();
-  for (const [id, audio] of want) own.set(id, audio ? replaceStreamAudio(orig(id), audio, { ...lv(id), sampleRate: Math.max(8000, Math.min(MAX_RATE, audio.sampleRate)) }) : silentStream(orig(id)));
-  if (size(own) <= g.length) return { streams: own, truncated, padded, lowered };
-  const exact = new Map<number, AwcStream>();
-  const long: Array<[number, AudioData]> = [];
-  for (const [id, audio] of want) {
-    const o = orig(id);
-    if (!audio) { exact.set(id, silentStream(o)); continue; }
-    if (audio.channels[0].length / audio.sampleRate <= seconds(o) + 1e-6) { const f = fitStreamAudio(o, audio, lv(id)); exact.set(id, f.stream); if (f.padded) padded.add(id); continue; }
-    long.push([id, audio]);
-  }
-  if (!long.length) return { streams: exact, truncated, padded, lowered };
-  // 1 · full length at the original rate
-  const full = new Map(exact);
-  for (const [id, audio] of long) full.set(id, replaceStreamAudio(orig(id), audio, lv(id)));
-  if (size(full) <= g.length) return { streams: full, truncated, padded, lowered };
-  // 2 · share the free bytes evenly: lower the rate first, cut only what does not fit even at MIN_RATE
-  const tiny = new Map(exact);
-  for (const [id] of long) tiny.set(id, silentStream(orig(id)));
-  let free = g.length - size(tiny);
-  for (let attempt = 0; attempt < 12 && free > 0; attempt++) {
-    const per = Math.floor(free / long.length);
-    const budget = Math.max(16, Math.floor((per - 64) / 2.001)); // samples: data + alignment + peak chunk
-    const m = new Map(exact), cuts = new Set<number>(), lows = new Set<number>();
-    for (const [id, audio] of long) {
-      const o = orig(id);
-      const sec = audio.channels[0].length / audio.sampleRate;
-      const floor = shots.has(id) ? Math.min(o.format.sampleRate, SHOT_MIN_RATE) : MIN_RATE;
-      const rate = Math.min(o.format.sampleRate, Math.max(floor, Math.floor(budget / sec)));
-      const keep = Math.min(audio.channels[0].length, Math.max(1, Math.floor((budget / rate) * audio.sampleRate)));
-      const a = keep < audio.channels[0].length ? fadeTo(audio, keep) : audio;
-      m.set(id, replaceStreamAudio(o, a, { ...lv(id), sampleRate: rate }));
-      if (keep < audio.channels[0].length) cuts.add(id);
-      if (rate < o.format.sampleRate) lows.add(id);
-    }
-    const over = size(m) - g.length;
-    if (over <= 0) { cuts.forEach((id) => truncated.add(id)); lows.forEach((id) => lowered.add(id)); return { streams: m, truncated, padded, lowered }; }
-    free -= over + 16 * long.length;
-  }
-  for (const [id, audio] of long) { const o = orig(id); exact.set(id, fitStreamAudio(o, fadeTo(audio, Math.floor(seconds(o) * audio.sampleRate)), lv(id)).stream); truncated.add(id); }
-  return { streams: exact, truncated, padded, lowered };
+  const streams = new Map<number, AwcStream>();
+  for (const [id, audio] of wanted) streams.set(id, audio ? exactStream(orig(id), audio) : silentStream(orig(id)));
+  const size = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }).length;
+  return { streams, over: Math.max(0, size - g.length) };
+}
+
+/** Seconds a container is too long: the extra bytes at its sounds' rates (16-bit mono). */
+function overSeconds(over: number, sounds: AudioData[]): number {
+  if (over <= 0) return 0;
+  const bytesPerSecond = sounds.reduce((s, a) => s + a.sampleRate * 2, 0) / Math.max(1, sounds.length);
+  return Math.max(0.01, over / Math.max(1, bytesPerSecond));
 }
 
 /**
  * Renders every ready slot once and writes it into all of its target streams.
  * `render` turns a slot assignment into audio (renderAssignment in the app; a stub in tests).
  */
-export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssignment) => Promise<AudioData>, onProgress?: (done: number, total: number, label: string) => void, opts: { allowEmpty?: boolean; allArchives?: boolean } & LayoutOptions = {}): Promise<BuildResult> {
+export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssignment) => Promise<AudioData>, onProgress?: (done: number, total: number, label: string) => void, opts: { allowEmpty?: boolean; allArchives?: boolean } = {}): Promise<BuildResult> {
   const ready = plan.items.filter((i) => i.status === 'ready');
   if (!ready.length && !opts.allowEmpty) throw new Error('Nichts zu bauen: Kein befüllter Slot ist einem Sound im Basis-Pack zugeordnet.');
   const want = new Map<number, Map<number, AudioData | null>>();
-  const labelOf = new Map<string, string>(); // "group:stream" → slot label (for truncation notes)
-  const shotStreams = new Map<number, Set<number>>(); // group → streams that hold a shot (never muffled)
+  const labels = new Map<number, Set<string>>(); // group → slots with an own sound in it (for "zu lang")
   let replaced = 0;
   for (const [n, it] of ready.entries()) {
     onProgress?.(n, ready.length, `${it.weaponLabel} · ${it.slotLabel}`);
@@ -227,33 +151,37 @@ export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssi
     for (const t of it.targets) {
       if (!want.has(t.group)) want.set(t.group, new Map());
       want.get(t.group)!.set(t.stream, audio);
-      labelOf.set(`${t.group}:${t.stream}`, `${it.weaponLabel} · ${it.slotLabel}`);
-      if (/fire$/.test(it.slot)) { if (!shotStreams.has(t.group)) shotStreams.set(t.group, new Set()); shotStreams.get(t.group)!.add(t.stream); }
+      if (audio) { if (!labels.has(t.group)) labels.set(t.group, new Set()); labels.get(t.group)!.add(`${it.weaponLabel} · ${it.slotLabel}`); }
       replaced++;
     }
   }
   onProgress?.(ready.length, ready.length, 'Archive werden geschrieben');
-  const byGroup = new Map<number, Map<number, AwcStream>>();
   // (inGameAudio below lays out one group the same way – keep both in step)
-  const truncated: string[] = [], padded: string[] = [], lowered: string[] = [];
+  const byGroup = new Map<number, Map<number, AwcStream>>();
+  const tooLong = new Map<string, { labels: string[]; overSeconds: number }>();
   for (const [gi, w] of want) {
-    const r = layoutGroup(pack, gi, w, shotStreams.get(gi), opts);
+    const r = layoutGroup(pack, gi, w);
     byGroup.set(gi, r.streams);
-    for (const id of r.truncated) truncated.push(labelOf.get(`${gi}:${id}`)!);
-    for (const id of r.padded) padded.push(labelOf.get(`${gi}:${id}`)!);
-    for (const id of r.lowered) lowered.push(labelOf.get(`${gi}:${id}`)!);
+    if (r.over > 0) {
+      const l = [...(labels.get(gi) ?? [])];
+      const sec = overSeconds(r.over, [...w.values()].filter((a): a is AudioData => !!a));
+      const k = l.join('|'); // the same sounds in another container: report once, the larger gap
+      if (!tooLong.has(k) || tooLong.get(k)!.overSeconds < sec) tooLong.set(k, { labels: l, overSeconds: sec });
+    }
   }
+  if (tooLong.size) throw new TooLongError([...tooLong.values()]);
   const outputs = exportPack(pack, byGroup, { includeUnchanged: opts.allArchives })
     .map((o) => ({ ...o, name: canonicalArchiveName(o.name) }));
-  return { outputs, replacedStreams: replaced, truncated: [...new Set(truncated)], padded: [...new Set(padded)], lowered: [...new Set(lowered)] };
+  return { outputs, replacedStreams: replaced };
 }
 
 export interface InGameSound {
-  /** exactly what the game file will hold: mono, levelled, at the stream's rate, shortened if it had to be */
+  /** exactly what the game file holds: the sound 1 : 1 in mono */
   audio: AudioData;
-  truncated: boolean;
-  lowered: boolean;
-  /** seconds before / after writing */
+  /** false: the sound (with the others in its container) does not fit the template – the build stops */
+  fits: boolean;
+  /** seconds the container is too long (0 when it fits) */
+  overSeconds: number;
   sourceSeconds: number;
   gameSeconds: number;
   /** level lost when the stereo sound is folded to mono (dB, ≤ 0) */
@@ -261,14 +189,14 @@ export interface InGameSound {
 }
 
 /**
- * What one slot will sound like in the game: lays out its container exactly like runBuild (the other sounds of the
- * plan that share that container take their share of the free bytes) and decodes the stream again.
- * null when the slot is not written into the game (unmapped, not in the base, muted).
+ * What one slot will be in the game: lays out its container exactly like runBuild (with the other sounds of the plan
+ * that share it) and decodes the stream again. null when the slot is not written into the game (unmapped, not in
+ * the base, muted).
  */
-export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, render: (a: SlotAssignment) => Promise<AudioData>, lo: LayoutOptions = {}): Promise<InGameSound | null> {
+export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, render: (a: SlotAssignment) => Promise<AudioData>): Promise<InGameSound | null> {
   if (item.status !== 'ready' || item.assignment.entryId === SILENCE || !item.targets.length) return null;
   const t = item.targets[0];
-  const want = new Map<number, AudioData | null>(), shots = new Set<number>();
+  const want = new Map<number, AudioData | null>();
   let source: AudioData | null = null;
   for (const it of plan.items) {
     if (it.status !== 'ready') continue;
@@ -276,15 +204,15 @@ export async function inGameAudio(plan: BuildPlan, pack: Pack, item: PlanItem, r
     if (!here.length) continue;
     const audio = it.assignment.entryId === SILENCE ? null : await render(it.assignment);
     if (it === item) source = audio;
-    for (const x of here) { want.set(x.stream, audio); if (/fire$/.test(it.slot)) shots.add(x.stream); }
+    for (const x of here) want.set(x.stream, audio);
   }
   if (!source) return null;
-  const r = layoutGroup(pack, t.group, want, shots, lo);
+  const r = layoutGroup(pack, t.group, want);
   const audio = streamToAudio(r.streams.get(t.stream)!);
-  const n = source.channels[0].length, monoLossDb = monoMix(source).lossDb;
   return {
-    audio, truncated: r.truncated.has(t.stream), lowered: r.lowered.has(t.stream),
-    sourceSeconds: n / source.sampleRate, gameSeconds: audio.channels[0].length / audio.sampleRate, monoLossDb,
+    audio, fits: r.over === 0, overSeconds: overSeconds(r.over, [...want.values()].filter((a): a is AudioData => !!a)),
+    sourceSeconds: source.channels[0].length / source.sampleRate, gameSeconds: audio.channels[0].length / audio.sampleRate,
+    monoLossDb: monoMix(source).lossDb,
   };
 }
 

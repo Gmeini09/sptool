@@ -137,9 +137,9 @@ export async function ensureBase(onStage?: (s: string) => void): Promise<Pack | 
 }
 
 /**
- * Room for own sounds in a pack: how much of a long shot (1.2 s) for every pistol and a whole reload (1.6 s) the game
- * file keeps – 1 per sound at full length and rate. Container sizes cannot grow (encrypted archive), so a pack whose
- * creator used long sounds there cuts less.
+ * Room for own sounds in a pack: how much of a long shot (1.2 s) for every pistol and a whole reload (1.6 s) fits
+ * 1 : 1 – 1 per sound that fits whole. Container sizes cannot grow (encrypted archive), so a pack whose creator used
+ * long sounds there has more room.
  */
 export async function soundRoom(pack: Pack): Promise<number> {
   const tone = (sec: number) => { const n = Math.round(sec * 44100), c = new Float32Array(n); for (let i = 0; i < n; i++) c[i] = Math.sin(i * 0.2) * 0.5; return { sampleRate: 44100, channels: [c] }; };
@@ -158,7 +158,7 @@ export async function soundRoom(pack: Pack): Promise<number> {
     seen.add(it.targets[0].group);
     const g = await inGameAudio(plan, pack, it, async (a) => (a.entryId === 'shot' ? shot : reload));
     const n = plan.items.filter((o) => o.status === 'ready' && o.assignment.entryId !== SILENCE && o.targets[0].group === it.targets[0].group).length;
-    if (g) room += n * (g.gameSeconds / g.sourceSeconds) * (0.5 + 0.5 * Math.min(1, g.audio.sampleRate / 44100));
+    if (g) room += n * Math.max(0, 1 - g.overSeconds / (n * g.sourceSeconds));
   }
   return room;
 }

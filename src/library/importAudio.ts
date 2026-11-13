@@ -10,6 +10,7 @@ import { putBlob } from '../services/storage';
 import { requireFeature } from '../account/perms';
 import { newId } from './actions';
 import { classifySound } from '../dsp/classify';
+import { decodeWav } from '../dsp/wav';
 
 export const AUDIO_ACCEPT = '.mp3,.wav,.ogg,.oga,.opus,.m4a,.aac,.flac,.webm,.mp4,.aif,.aiff,audio/*';
 export const AUDIO_EXT = /\.(mp3|wav|wave|ogg|oga|opus|m4a|aac|flac|webm|mp4|aif|aiff)$/i;
@@ -33,6 +34,11 @@ const SLOT_META: Record<string, { type: SoundType; component?: string }> = {
 let ctx: AudioContext | null = null;
 /** Decodes any format the browser engine knows (Chromium/WebView2: mp3, wav, ogg, opus, aac/m4a, flac, webm, mp4). */
 export async function decodeAny(bytes: Uint8Array): Promise<AudioData> {
+  // WAV is read directly: own sample rate and every sample as it is (the browser engine would resample it)
+  if (bytes.length > 12 && String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.subarray(8, 12)) === 'WAVE') {
+    const w = decodeWav(bytes);
+    return { sampleRate: w.sampleRate, channels: w.channels.slice(0, 2) };
+  }
   ctx ??= new AudioContext();
   const buf = await ctx.decodeAudioData(bytes.slice().buffer);
   const channels = Array.from({ length: Math.min(2, buf.numberOfChannels) }, (_, i) => new Float32Array(buf.getChannelData(i)));
@@ -84,7 +90,7 @@ export async function importAudioFiles(files: File[], target: ImportTarget): Pro
     if (f.size > MAX_BYTES) { toast('warning', `${f.name} übersprungen`, 'Dateien über 80 MB werden nicht unterstützt.'); continue; }
     try {
       const raw = await decodeAny(new Uint8Array(await f.arrayBuffer())).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); });
-      const audio = trimSilence(raw);
+      const audio = raw; // 1 : 1 – nothing cut off
       if (peakOf(audio) < 0.001) throw new Error('Die Datei ist stumm.');
       out.push(await addAudioEntry(audio, f.name.replace(/\.[^.]+$/, ''), target, `Importierte Datei ${f.name}`));
       logger.audio(`Imported ${f.name} for ${target.weapon}/${target.slot} (${audio.sampleRate} Hz, ${(audio.channels[0].length / audio.sampleRate).toFixed(2)} s)`);
@@ -146,7 +152,7 @@ export function splitReload(a: AudioData, max = 4): AudioData[] {
 export async function importWholeReload(file: File, weapon: WeaponId | 'universal', split = true, opts: { onWhole?: () => void } = {}): Promise<Record<string, LibraryEntry>> {
   if (!requireFeature('wavImport')) return {};
   try {
-    const audio = trimSilence(await decodeAny(new Uint8Array(await file.arrayBuffer())).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); }));
+    const audio = await decodeAny(new Uint8Array(await file.arrayBuffer())).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); });
     if (peakOf(audio) < 0.001) throw new Error('Die Datei ist stumm.');
     const base0 = file.name.replace(/\.[^.]+$/, '');
     const parts = split ? splitReload(audio) : [];
@@ -208,7 +214,7 @@ export async function importSorted(files: File[], weapon: WeaponId): Promise<Sor
     if (!AUDIO_EXT.test(f.name) && !f.type.startsWith('audio/')) { toast('warning', `${f.name} übersprungen`, 'Das ist keine Audiodatei (MP3, WAV, OGG, M4A, FLAC …).'); continue; }
     if (f.size > MAX_BYTES) { toast('warning', `${f.name} übersprungen`, 'Dateien über 80 MB werden nicht unterstützt.'); continue; }
     try {
-      const audio = trimSilence(await decodeAny(new Uint8Array(await f.arrayBuffer())).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); }));
+      const audio = await decodeAny(new Uint8Array(await f.arrayBuffer())).catch(() => { throw new Error('Das Format kann nicht gelesen werden. Wandle die Datei in MP3 oder WAV um.'); });
       if (peakOf(audio) < 0.001) throw new Error('Die Datei ist stumm.');
       const base = f.name.replace(/\.[^.]+$/, '');
       const cl = classifySound(audio);

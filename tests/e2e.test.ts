@@ -52,12 +52,16 @@ test('pistol shot: built into both archives, sizes unchanged, nothing else touch
   assert.ok(r2.outputs.length > 0);
 });
 
-test('a longer sound than the stream is cut and reported, never grows the archive', async () => {
+test('a sound longer than the template has room for is never cut: the build stops and says how much too long', async () => {
+  const { TooLongError } = await import('../src/projects/build');
   const pack = openPack(files);
   const p = assign(newProject('t', 'x'), 'pistol', 'fire', { entryId: 'a' });
-  const r = await runBuild(planBuild(p, WEAPON_PROFILES, shipped, pack), pack, async () => tone(3));
-  for (const o of r.outputs) assert.equal(o.bytes.length, files.find((f) => f.name === o.name)!.bytes.length);
-  assert.ok(r.truncated.length > 0);
+  await assert.rejects(runBuild(planBuild(p, WEAPON_PROFILES, shipped, pack), pack, async () => tone(3)), (e: unknown) => {
+    assert.ok(e instanceof TooLongError);
+    assert.match((e as Error).message, /Pistol · Schuss ist \d+,\d+ s zu lang/);
+    assert.ok((e as InstanceType<typeof TooLongError>).parts[0].overSeconds > 1);
+    return true;
+  });
 });
 
 test('shipped mapping: Pistol, MK2 and .50 shots are written (each into its file and its F01 copy)', async () => {
@@ -85,54 +89,52 @@ test('whole reload: muted parts free their bytes, archive size unchanged', async
   for (const s of ['mag_in', 'slide', 'reload_finish']) p = assign(p, 'pistol', s, { entryId: SILENCE });
   const plan = planBuild(p, WEAPON_PROFILES, m, pack);
   assert.equal(plan.ready, 4);
-  const r = await runBuild(plan, pack, async () => tone(0.9));
+  const r = await runBuild(plan, pack, async () => tone(0.8));
   for (const o of r.outputs) assert.equal(o.bytes.length, files.find((f) => f.name === o.name)!.bytes.length);
   const out = openPack(r.outputs);
   const s = out.groups[indexPack(out).get('F01')![0]].awc.streams.find((x) => x.id === ids[5])!;
-  assert.ok(s.format.samples / s.format.sampleRate > 0.85, `whole reload keeps its length (${(s.format.samples / s.format.sampleRate).toFixed(2)} s)`);
-  assert.equal(r.truncated.length, 0);
+  assert.equal(s.format.samples, Math.round(0.8 * 44100), 'whole reload 1 : 1, every sample');
 });
 
-test('a shot longer than its slot keeps its full sample rate and is faded out instead of muffled', async () => {
+test('1 : 1: a 22 kHz sound stays 22 kHz, same samples, same level – nothing resampled or normalised', async () => {
   const pack = openPack(files);
-  const orig = streamOf(pack, 'F03', 277856074)[0].format;
   const p = assign(newProject('t', 'x'), 'pistol', 'fire', { entryId: 'a' });
-  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  const r = await runBuild(plan, pack, async () => tone(1.6, 300, 48000), undefined, { allArchives: true });
+  const src = tone(0.3, 300, 22050); const x = src.channels[0]; for (let i = 0; i < x.length; i++) x[i] *= 0.6; // peak 0.3
+  const r = await runBuild(planBuild(p, WEAPON_PROFILES, shipped, pack), pack, async () => src, undefined, { allArchives: true });
   const out = streamOf(openPack(r.outputs), 'F03', 277856074)[0];
-  assert.ok(out.format.sampleRate >= Math.min(orig.sampleRate, 32000), `rate ${out.format.sampleRate}`);
-  assert.deepEqual(r.truncated, ['Pistol · Schuss']);
+  assert.equal(out.format.sampleRate, 22050);
   const a = streamToAudio(out).channels[0];
-  assert.ok(Math.abs(a[a.length - 1]) < 0.01, 'the end is faded out');
+  assert.equal(a.length, x.length);
+  for (let i = 0; i < a.length; i += 97) assert.ok(Math.abs(a[i] - x[i]) < 1 / 16000, `sample ${i}`);
 });
 
-test('"So klingt es im Spiel" plays exactly what the build writes – also when the sound is cut and lowered', async () => {
+test('"So klingt es im Spiel" plays exactly what the build writes, and shows when a sound does not fit', async () => {
   const { inGameAudio } = await import('../src/projects/build');
   const pack = openPack(files);
   let p = assign(newProject('t', 'x'), 'pistol', 'fire', { entryId: 'short' });
   p = assign(p, 'pistol', 'mag_out', { entryId: 'long' });
   const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  const sounds: Record<string, ReturnType<typeof tone>> = { short: tone(0.25), long: tone(6, 330) };
+  const sounds: Record<string, ReturnType<typeof tone>> = { short: tone(0.25), long: tone(0.3, 330) };
   const render = async (a: { entryId: string }) => sounds[a.entryId];
   const r = await runBuild(plan, pack, render, undefined, { allArchives: true });
   const out = openPack(r.outputs);
   for (const it of plan.items.filter((i) => i.status === 'ready')) {
     const g = await inGameAudio(plan, pack, it, render);
-    assert.ok(g, it.slot);
+    assert.ok(g, it.slot); assert.ok(g.fits, `${it.slot} fits (${g.overSeconds} s over)`);
     const t = it.targets[0], written = out.groups.find((x) => x.refs.some((ref) => pack.groups[t.group].refs.some((o) => o.archive === ref.archive && o.offset === ref.offset)))!;
     assert.deepEqual(g.audio.channels[0], streamToAudio(written.awc.streams.find((s) => s.id === t.stream)!).channels[0], it.slot);
-    if (it.slot === 'mag_out') { assert.ok(g.truncated && g.gameSeconds < g.sourceSeconds, 'long reload is reported as cut'); }
-    else assert.ok(!g.truncated);
   }
-  // stereo that cancels in mono: one channel is written instead of silence
+  // too long for the template: shown before building, the sound itself stays whole
+  const tooLong = await inGameAudio(plan, pack, plan.items.find((i) => i.slot === 'fire')!, async (a) => (a.entryId === 'short' ? tone(6, 330) : sounds.long));
+  assert.ok(tooLong && !tooLong.fits && tooLong.overSeconds > 0);
+  assert.ok(Math.abs(tooLong.gameSeconds - 6) < 0.001, 'not cut');
+  // stereo that cancels in mono: plain mix-down (nothing picked by itself), the loss is reported
   const anti = { sampleRate: 44100, channels: [tone(0.25).channels[0], tone(0.25).channels[0].map((x) => -x)] };
   const g = await inGameAudio(plan, pack, plan.items.find((i) => i.slot === 'fire')!, async (a) => (a.entryId === 'short' ? anti : sounds.long));
-  let peak = 0; for (const v of g!.audio.channels[0]) peak = Math.max(peak, Math.abs(v));
-  assert.ok(peak > 0.4, `audible in the game, peak ${peak}`);
-  assert.ok(g!.monoLossDb > -1);
+  assert.ok(g!.monoLossDb < -6, 'mono loss is shown to the user');
 });
 
-test('a sound that fits is written like a pack made by hand: own rate, own length, full scale', async () => {
+test('a sound that fits is written like a pack made by hand: own rate, own length, own level', async () => {
   const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 1.5 }));
   let p = newProject('Hand', 'me');
   p = assign(p, 'pistol', 'fire', { entryId: 'shot' });
@@ -147,8 +149,7 @@ test('a sound that fits is written like a pack made by hand: own rate, own lengt
   assert.equal(s.format.samples, shot.channels[0].length); // no silence padded on
   const a = streamToAudio(s).channels[0];
   let peak = 0; for (const v of a) peak = Math.max(peak, Math.abs(v));
-  assert.ok(peak > 0.99, `full scale like creator packs, got ${peak}`);
-  assert.deepEqual(res.truncated, []);
+  assert.ok(Math.abs(peak - 0.6) < 0.01, `level kept 1 : 1, got ${peak}`);
 });
 
 test('soundRoom: a template with longer shot slots has more room for own sounds', async () => {
@@ -157,7 +158,7 @@ test('soundRoom: a template with longer shot slots has more room for own sounds'
   assert.ok(roomy > tight, `${roomy} > ${tight}`);
 });
 
-test('"Klingt im Spiel anders?" report names the template and marks a cut sound', async () => {
+test('"Klingt im Spiel anders?" report names the template and marks a sound that does not fit', async () => {
   const { soundReport } = await import('../src/projects/report');
   const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 0.3 }));
   let p = newProject('Bericht', 'me');
@@ -166,39 +167,17 @@ test('"Klingt im Spiel anders?" report names the template and marks a cut sound'
   const text = await soundReport(plan, pack, async () => tone(2), { name: 'Bericht', template: 'Testvorlage', soundName: () => 'Mein Schuss' });
   assert.match(text, /Vorlage: Testvorlage/);
   assert.match(text, /Pistol · .*Mein Schuss/);
-  assert.match(text, /GEKÜRZT/);
+  assert.match(text, /PASST NICHT \(\d+,\d+ s zu lang\)/);
 });
 
-test('"Lautstärke wie das Original": a quiet sound gets the loudness of the template sound, without clipping', async () => {
+test('a quiet sound stays as quiet as its file (no level change by SP Tool)', async () => {
   const { inGameAudio } = await import('../src/projects/build');
   const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 0.6 }));
-  let p = newProject('Pegel', 'me');
-  p = assign(p, 'pistol', 'fire', { entryId: 'quiet' });
+  const p = assign(newProject('Pegel', 'me'), 'pistol', 'fire', { entryId: 'quiet' });
   const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
   const it = plan.items.find((i) => i.slot === 'fire' && i.status === 'ready')!;
   const quiet = tone(0.4); const x = quiet.channels[0]; for (let i = 0; i < x.length; i++) x[i] *= 0.1; // peak 0.05
-  const rms = (c: Float32Array) => Math.sqrt(c.reduce((s, v) => s + v * v, 0) / c.length);
-  const peakOf = (c: Float32Array) => c.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-  const kept = await inGameAudio(plan, pack, it, async () => quiet);
-  const matched = await inGameAudio(plan, pack, it, async () => quiet, { matchLevel: true });
-  assert.ok(peakOf(kept!.audio.channels[0]) > 0.99, 'off: full scale like a pack made by hand');
-  const m = matched!.audio.channels[0];
-  assert.ok(rms(m) > rms(quiet.channels[0]) * 5, 'on: clearly louder than the file');
-  assert.ok(peakOf(m) <= 1.0001, 'never above full scale');
-});
-
-test('"Lautstärke wie das Original" never matches to a muted original (creators mute unused reload parts)', async () => {
-  const { inGameAudio } = await import('../src/projects/build');
-  const base = openPack(synthPack({ f01Max: 120, shotSeconds: 0.6 }));
-  let p = newProject('Stumm', 'me');
-  p = assign(p, 'pistol', 'fire', { entryId: 'x' });
-  // a template whose creator put a near-silent sound there (−40 dB)
-  const muted = tone(0.4); const mx = muted.channels[0]; for (let i = 0; i < mx.length; i++) mx[i] *= 0.02;
-  const built = await runBuild(planBuild(p, WEAPON_PROFILES, shipped, base), base, async () => muted, undefined, { allArchives: true });
-  const pack = openPack(built.outputs.map((o) => ({ name: o.name, bytes: o.bytes })));
-  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
-  const it = plan.items.find((i) => i.slot === 'fire' && i.status === 'ready')!;
-  const g = await inGameAudio(plan, pack, it, async () => tone(0.4), { matchLevel: true });
+  const g = await inGameAudio(plan, pack, it, async () => quiet);
   const peak = g!.audio.channels[0].reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-  assert.ok(peak > 0.4, `keeps its own level, got ${peak}`);
+  assert.ok(Math.abs(peak - 0.05) < 0.002, `peak ${peak}`);
 });

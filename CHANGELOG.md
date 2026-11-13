@@ -7,19 +7,18 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
 ## 1.10.12 – 28.10.2026
-- Soundpack erstellen: „So klingt es im Spiel“ spielt deinen Sound genau so, wie er in die Spieldatei kommt (Mono, Lautstärke, Länge)
-- Schon vor dem Erstellen siehst du, wenn ein Sound im Spiel gekürzt wird, dumpfer klingt oder in Mono dünner wird
+- Soundpack erstellen: „So klingt es im Spiel“ spielt deinen Sound genau so, wie er in die Spieldatei kommt
+- Schon vor dem Erstellen siehst du, wenn ein Sound nicht in die Vorlage passt (und um wie viele Sekunden) oder in Mono dünner wird
 - Neuer Knopf „Alle importierten löschen“ leert die Liste deiner importierten Schüsse – Sounds aus gespeicherten Soundpacks bleiben dort erhalten
 - Nachladen: Die alten Reload-Vorlagen sind raus – neu sind 4 freie Reload-Sounds aus dem Internet (CC0, gemeinfrei), oder du nimmst deinen eigenen
 - „Ist ein Schuss“ / „Ist Nachladen“ lässt keine falsch einsortierten Sounds mehr zurück
 - Hinweis beim Nachladen: Bei „In Teile schneiden“ wirkt im Spiel bisher nur „Magazin raus“
-- Sounds klingen im Spiel wie bei einem von Hand gebauten Soundpack: dein Sound kommt auf volle Lautstärke wie bei den Erstellern (die Schüsse in 58 Packs liegen fast alle bei 0 dB – leiser klingt er im Spiel flach und dünn), und wenn in der Vorlage Platz ist, kommt der Sound mit seiner eigenen Abtastrate und Länge ins Spiel statt auf die Rate der Vorlage umgerechnet
-- Vorlage mit Platz: Beim ersten Einrichten nimmt SP Tool unter deinen Soundpacks automatisch das, in dem lange Schüsse und Reloads am wenigsten gekürzt werden. Wird ein Sound trotzdem gekürzt, sucht „Vorlage mit mehr Platz suchen“ auf deinem PC nach einer besseren
-- Stereo-Sounds, die sich in Mono auslöschen würden, kommen jetzt trotzdem hörbar ins Spiel (SP Tool nimmt dann den lauteren Kanal)
+- Sounds kommen 1 : 1 ins Spiel: eigene Länge, eigene Abtastrate, eigene Lautstärke – SP Tool kürzt, normalisiert und rechnet nichts mehr selbst um. Passt ein Sound nicht in die Vorlage, bricht das Erstellen mit „… ist X s zu lang“ ab: kürze ihn selbst im Editor oder nimm eine Vorlage mit mehr Platz
+- Vorlage mit Platz: Beim ersten Einrichten nimmt SP Tool unter deinen Soundpacks automatisch das mit dem meisten Platz für lange Sounds. Passt ein Sound trotzdem nicht, sucht „Vorlage mit mehr Platz suchen“ auf deinem PC nach einer besseren
+- Import: WAV-Dateien werden genau so übernommen, wie sie sind (keine Umrechnung der Abtastrate, keine Stille am Anfang/Ende abgeschnitten)
 - Neuer Knopf „Klingt im Spiel anders?“ nach dem Erstellen: kopiert einen Bericht (Vorlage, Länge und Rate vorher/im Spiel, gekürzt …) zum Weiterschicken
 - Absturz-Erkennung in der Windows-App repariert: „Soundpack wiederhergestellt“ kommt nur noch nach einem echten Absturz, nicht nach normalem Schließen oder Updates
 - „Original“ neben „So klingt es im Spiel“: spielt zum Vergleich den Sound, der jetzt an dieser Stelle in deiner Vorlage steckt
-- Schalter „Lautstärke wie das Original“: dein Sound bekommt die Lautheit des Sounds, den er ersetzt (aus = volle Lautstärke; ein in der Vorlage stummgeschaltetes Original wird dabei ignoriert)
 - Fertig-Bildschirm zeigt, aus welcher Vorlage die übrigen Sounds stammen
 - INSTALLER-BAUEN.cmd und die GitHub-Release-Pipeline bauen jetzt die Windows-App (Go) statt der alten Tauri-Version
 - Weniger Meldungen: Die Warnung „SP Tool wurde beim letzten Mal nicht richtig beendet“ kam fälschlich nach fast jedem Schließen und ist weg – ebenso überflüssige Bestätigungen (Reload übernommen, Slot gesetzt, Soundpack erstellt, „Danke – das hilft der Erkennung“ …)

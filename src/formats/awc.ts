@@ -220,10 +220,8 @@ export function monoMix(a: AudioData): { mono: Float32Array; lossDb: number } {
   for (const ch of a.channels) for (let i = 0; i < n; i++) avg[i] += ch[i] / a.channels.length;
   const stereo = a.channels.reduce((s, c) => s + ms(c), 0) / a.channels.length;
   const loss = (x: Float32Array) => (stereo > 1e-12 ? Math.min(0, 10 * Math.log10(Math.max(1e-12, ms(x)) / stereo)) : 0);
-  const l = loss(avg);
-  if (l >= -6) return { mono: avg, lossDb: l };
-  const loudest = a.channels.reduce((b, c) => (ms(c) > ms(b) ? c : b));
-  return { mono: loudest, lossDb: loss(loudest) };
+  // the plain mix-down (like any audio editor) – SP Tool picks nothing by itself; lossDb tells the user what mono costs
+  return { mono: avg, lossDb: loss(avg) };
 }
 
 /** Windowed-sinc resampler (16 taps) – good enough for one-shot SFX, no external deps. */

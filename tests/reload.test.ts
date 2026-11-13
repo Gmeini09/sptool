@@ -8,7 +8,7 @@ import { openPack } from '../src/formats/pack';
 import { parseMapping } from '../src/formats/mapping';
 import { streamToAudio } from '../src/formats/awc';
 import { buildGameTest, applyReloadTest, RELOAD_TEST_GROUPS } from '../src/projects/gameTest';
-import { indexPack, planBuild, runBuild, SILENCE, blockedLabels } from '../src/projects/build';
+import { indexPack, planBuild, runBuild, SILENCE, blockedLabels, TooLongError } from '../src/projects/build';
 import { newProject, assign } from '../src/projects/project';
 import { WEAPON_PROFILES } from '../src/weapons/profiles';
 
@@ -52,15 +52,19 @@ test('whole reload keeps its full length; other parts muted; nothing else in the
   const len = 1.6, sr = 44100;
   const whole = { sampleRate: sr, channels: [Float32Array.from({ length: Math.round(len * sr) }, (_, i) => (i % 9000 < 400 ? Math.sin(i / 2) * 0.8 : 0))] };
   let rendered = 0;
-  const r = await runBuild(plan, pack, async (a) => { rendered++; assert.notEqual(a.entryId, SILENCE); return whole as never; });
+  let r;
+  try { r = await runBuild(plan, pack, async (a) => { rendered++; assert.notEqual(a.entryId, SILENCE); return whole as never; }); }
+  catch (e) {
+    // a template whose creator left too little room: SP Tool never cuts – it says so (1 : 1 or nothing)
+    assert.ok(e instanceof TooLongError, String(e));
+    return;
+  }
   assert.equal(rendered, 1, 'silence is never rendered');
-  // templates whose creator already shrank the other reload sounds leave little room: then the rate goes down to
-  // 11 kHz and at most the tail is cut – the reload must still be (nearly) whole
-  const minLen = r.truncated.length ? 0.9 : len - 0.01;
+  const minLen = len - 0.01;
   assert.equal(r.outputs[0].bytes.length, pack.archives[0].bytes.length, 'archive size unchanged');
   const after = f01(openPack(r.outputs.map((o) => ({ name: o.name, bytes: o.bytes }))));
   const ids = (k: number) => RELOAD_TEST_GROUPS[k].streams.map((s) => s.stream);
-  for (const id of ids(1)) { const s = after.awc.streams.find((x) => x.id === id)!; assert.ok(secs(s) >= minLen, `mag_out variation ${id}: ${secs(s).toFixed(2)} s`); assert.ok(s.format.sampleRate >= 11025); }
+  for (const id of ids(1)) { const s = after.awc.streams.find((x) => x.id === id)!; assert.ok(secs(s) >= minLen, `mag_out variation ${id}: ${secs(s).toFixed(2)} s`); assert.equal(s.format.sampleRate, sr); }
   for (const id of [...ids(0), ...ids(2)]) assert.ok(secs(after.awc.streams.find((x) => x.id === id)!) <= 0.03, `muted ${id}`);
   const touched = new Set([...ids(0), ...ids(1), ...ids(2)]);
   for (const s of before.awc.streams) if (!touched.has(s.id)) {
@@ -69,7 +73,7 @@ test('whole reload keeps its full length; other parts muted; nothing else in the
   }
 });
 
-test('a short sound in a long stream is written exactly as before (same size, padded)', { skip }, async () => {
+test('a short sound in a long stream is written 1 : 1 (its own length, no silence added)', { skip }, async () => {
   const pack = load();
   const mapping = applyReloadTest(parseMapping({ version: 1, updatedAt: 0, entries: [] }), 'pistol', [1]).mapping;
   const p = assign(newProject('T', ''), 'pistol', 'mag_out', { entryId: 'click' });
@@ -78,6 +82,7 @@ test('a short sound in a long stream is written exactly as before (same size, pa
   const after = f01(openPack(r.outputs.map((o) => ({ name: o.name, bytes: o.bytes }))));
   const o = f01(pack).awc.streams.find((x) => x.id === RELOAD_TEST_GROUPS[0].streams[0].stream)!;
   const n = after.awc.streams.find((x) => x.id === o.id)!;
-  assert.equal(n.format.samples, o.format.samples);
-  assert.equal(n.data.length, o.data.length);
+  assert.ok(o.format.samples > 2000);
+  assert.equal(n.format.samples, 2000);
+  assert.equal(n.format.sampleRate, 44100);
 });
