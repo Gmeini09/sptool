@@ -13,13 +13,13 @@ Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version
 - Nachladen: Die alten Reload-Vorlagen sind raus – neu sind 4 freie Reload-Sounds aus dem Internet (CC0, gemeinfrei), oder du nimmst deinen eigenen
 - „Ist ein Schuss“ / „Ist Nachladen“ lässt keine falsch einsortierten Sounds mehr zurück
 - Hinweis beim Nachladen: Bei „In Teile schneiden“ wirkt im Spiel bisher nur „Magazin raus“
-- Sounds klingen im Spiel wie bei einem von Hand gebauten Soundpack: Lautstärke bleibt wie in deiner Datei (kein Hochziehen auf volle Lautstärke mehr), und wenn in der Vorlage Platz ist, kommt der Sound mit seiner eigenen Abtastrate und Länge ins Spiel statt auf die Rate der Vorlage umgerechnet
+- Sounds klingen im Spiel wie bei einem von Hand gebauten Soundpack: dein Sound kommt auf volle Lautstärke wie bei den Erstellern (die Schüsse in 58 Packs liegen fast alle bei 0 dB – leiser klingt er im Spiel flach und dünn), und wenn in der Vorlage Platz ist, kommt der Sound mit seiner eigenen Abtastrate und Länge ins Spiel statt auf die Rate der Vorlage umgerechnet
 - Vorlage mit Platz: Beim ersten Einrichten nimmt SP Tool unter deinen Soundpacks automatisch das, in dem lange Schüsse und Reloads am wenigsten gekürzt werden. Wird ein Sound trotzdem gekürzt, sucht „Vorlage mit mehr Platz suchen“ auf deinem PC nach einer besseren
 - Stereo-Sounds, die sich in Mono auslöschen würden, kommen jetzt trotzdem hörbar ins Spiel (SP Tool nimmt dann den lauteren Kanal)
 - Neuer Knopf „Klingt im Spiel anders?“ nach dem Erstellen: kopiert einen Bericht (Vorlage, Länge und Rate vorher/im Spiel, gekürzt …) zum Weiterschicken
 - Absturz-Erkennung in der Windows-App repariert: „Soundpack wiederhergestellt“ kommt nur noch nach einem echten Absturz, nicht nach normalem Schließen oder Updates
 - „Original“ neben „So klingt es im Spiel“: spielt zum Vergleich den Sound, der jetzt an dieser Stelle in deiner Vorlage steckt
-- Schalter „Lautstärke wie das Original“: dein Sound bekommt die Lautheit des Sounds, den er ersetzt (aus = so laut wie deine Datei; ein in der Vorlage stummgeschaltetes Original wird dabei ignoriert)
+- Schalter „Lautstärke wie das Original“: dein Sound bekommt die Lautheit des Sounds, den er ersetzt (aus = volle Lautstärke; ein in der Vorlage stummgeschaltetes Original wird dabei ignoriert)
 - Fertig-Bildschirm zeigt, aus welcher Vorlage die übrigen Sounds stammen
 - INSTALLER-BAUEN.cmd und die GitHub-Release-Pipeline bauen jetzt die Windows-App (Go) statt der alten Tauri-Version
 - Weniger Meldungen: Die Warnung „SP Tool wurde beim letzten Mal nicht richtig beendet“ kam fälschlich nach fast jedem Schließen und ist weg – ebenso überflüssige Bestätigungen (Reload übernommen, Slot gesetzt, Soundpack erstellt, „Danke – das hilft der Erkennung“ …)

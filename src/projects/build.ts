@@ -104,7 +104,10 @@ const MIN_RATE = 11025; // below this a reload sounds like a telephone
 const SHOT_MIN_RATE = 32000;
 // a sound is written at its own rate when there is room (like a pack made by hand) – never above this
 const MAX_RATE = 48000;
-// the level of a sound stays as it is, like in a pack made by hand (no normalising to full scale)
+// own sounds are brought to full scale, like in a pack made by hand: creators' shots and reload parts peak at
+// 0 dBFS (median over 58 packs) – a sound left at the level of its file comes out thin and quiet in the game.
+// Only "Lautstärke wie das Original" keeps the level it matched.
+const FULL = { normalize: true } as const;
 const KEEP = { normalize: false } as const;
 
 /** The first `keep` samples with a soft fade-out (last quarter, at most 120 ms) – used when a sound must be shortened. */
@@ -129,14 +132,14 @@ function punch(c: Float32Array, rate: number): number {
  * Many creators mute the reload parts they do not use (peak around −38 dB) – such a muted original is no reference,
  * the sound then keeps its own level instead of becoming inaudible.
  */
-function matchLevel(o: AwcStream, a: AudioData): AudioData {
+function matchLevel(o: AwcStream, a: AudioData): AudioData | null {
   const og = streamToAudio(o).channels[0];
   let ogPeak = 0;
   for (let i = 0; i < og.length; i++) ogPeak = Math.max(ogPeak, Math.abs(og[i]));
-  if (ogPeak < 0.1) return a; // below −20 dBFS: muted on purpose
+  if (ogPeak < 0.1) return null; // below −20 dBFS: muted on purpose – no reference
   const ref = punch(og, o.format.sampleRate);
   const m = monoMix(a).mono, cur = punch(m, a.sampleRate);
-  if (ref < 1e-6 || cur < 1e-6) return a;
+  if (ref < 1e-6 || cur < 1e-6) return null;
   let peak = 0;
   for (let i = 0; i < m.length; i++) peak = Math.max(peak, Math.abs(m[i]));
   const g = Math.min(ref / cur, 1 / Math.max(peak, 1e-9));
@@ -153,25 +156,32 @@ export interface LayoutOptions { matchLevel?: boolean }
 function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | null>, shots: Set<number> = new Set(), lo: LayoutOptions = {}): { streams: Map<number, AwcStream>; truncated: Set<number>; padded: Set<number>; lowered: Set<number> } {
   const g = pack.groups[gi];
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
-  const want = lo.matchLevel ? new Map([...wanted].map(([id, a]) => [id, a && matchLevel(orig(id), a)] as const)) : wanted;
+  // level: full scale, or – "Lautstärke wie das Original" – the loudness of the template sound (kept as matched)
+  const matched = new Set<number>();
+  const want = new Map([...wanted].map(([id, a]) => {
+    const m = a && lo.matchLevel ? matchLevel(orig(id), a) : null;
+    if (m) matched.add(id);
+    return [id, m ?? a] as const;
+  }));
+  const lv = (id: number) => (matched.has(id) ? KEEP : FULL);
   const truncated = new Set<number>(), padded = new Set<number>(), lowered = new Set<number>();
   const size = (m: Map<number, AwcStream>) => writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => m.get(s.id) ?? s) }).length;
   // 0 · every sound at its own rate and full length – exactly what a pack made by hand holds – when the container has room
   const own = new Map<number, AwcStream>();
-  for (const [id, audio] of want) own.set(id, audio ? replaceStreamAudio(orig(id), audio, { ...KEEP, sampleRate: Math.max(8000, Math.min(MAX_RATE, audio.sampleRate)) }) : silentStream(orig(id)));
+  for (const [id, audio] of want) own.set(id, audio ? replaceStreamAudio(orig(id), audio, { ...lv(id), sampleRate: Math.max(8000, Math.min(MAX_RATE, audio.sampleRate)) }) : silentStream(orig(id)));
   if (size(own) <= g.length) return { streams: own, truncated, padded, lowered };
   const exact = new Map<number, AwcStream>();
   const long: Array<[number, AudioData]> = [];
   for (const [id, audio] of want) {
     const o = orig(id);
     if (!audio) { exact.set(id, silentStream(o)); continue; }
-    if (audio.channels[0].length / audio.sampleRate <= seconds(o) + 1e-6) { const f = fitStreamAudio(o, audio, KEEP); exact.set(id, f.stream); if (f.padded) padded.add(id); continue; }
+    if (audio.channels[0].length / audio.sampleRate <= seconds(o) + 1e-6) { const f = fitStreamAudio(o, audio, lv(id)); exact.set(id, f.stream); if (f.padded) padded.add(id); continue; }
     long.push([id, audio]);
   }
   if (!long.length) return { streams: exact, truncated, padded, lowered };
   // 1 · full length at the original rate
   const full = new Map(exact);
-  for (const [id, audio] of long) full.set(id, replaceStreamAudio(orig(id), audio, KEEP));
+  for (const [id, audio] of long) full.set(id, replaceStreamAudio(orig(id), audio, lv(id)));
   if (size(full) <= g.length) return { streams: full, truncated, padded, lowered };
   // 2 · share the free bytes evenly: lower the rate first, cut only what does not fit even at MIN_RATE
   const tiny = new Map(exact);
@@ -188,7 +198,7 @@ function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | nul
       const rate = Math.min(o.format.sampleRate, Math.max(floor, Math.floor(budget / sec)));
       const keep = Math.min(audio.channels[0].length, Math.max(1, Math.floor((budget / rate) * audio.sampleRate)));
       const a = keep < audio.channels[0].length ? fadeTo(audio, keep) : audio;
-      m.set(id, replaceStreamAudio(o, a, { ...KEEP, sampleRate: rate }));
+      m.set(id, replaceStreamAudio(o, a, { ...lv(id), sampleRate: rate }));
       if (keep < audio.channels[0].length) cuts.add(id);
       if (rate < o.format.sampleRate) lows.add(id);
     }
@@ -196,7 +206,7 @@ function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | nul
     if (over <= 0) { cuts.forEach((id) => truncated.add(id)); lows.forEach((id) => lowered.add(id)); return { streams: m, truncated, padded, lowered }; }
     free -= over + 16 * long.length;
   }
-  for (const [id, audio] of long) { const o = orig(id); exact.set(id, fitStreamAudio(o, fadeTo(audio, Math.floor(seconds(o) * audio.sampleRate)), KEEP).stream); truncated.add(id); }
+  for (const [id, audio] of long) { const o = orig(id); exact.set(id, fitStreamAudio(o, fadeTo(audio, Math.floor(seconds(o) * audio.sampleRate)), lv(id)).stream); truncated.add(id); }
   return { streams: exact, truncated, padded, lowered };
 }
 

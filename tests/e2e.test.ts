@@ -132,7 +132,7 @@ test('"So klingt es im Spiel" plays exactly what the build writes – also when 
   assert.ok(g!.monoLossDb > -1);
 });
 
-test('a sound that fits is written like a pack made by hand: own rate, own length, own level', async () => {
+test('a sound that fits is written like a pack made by hand: own rate, own length, full scale', async () => {
   const pack = openPack(synthPack({ f01Max: 120, shotSeconds: 1.5 }));
   let p = newProject('Hand', 'me');
   p = assign(p, 'pistol', 'fire', { entryId: 'shot' });
@@ -147,7 +147,7 @@ test('a sound that fits is written like a pack made by hand: own rate, own lengt
   assert.equal(s.format.samples, shot.channels[0].length); // no silence padded on
   const a = streamToAudio(s).channels[0];
   let peak = 0; for (const v of a) peak = Math.max(peak, Math.abs(v));
-  assert.ok(Math.abs(peak - 0.6) < 0.01, `level kept, got ${peak}`);
+  assert.ok(peak > 0.99, `full scale like creator packs, got ${peak}`);
   assert.deepEqual(res.truncated, []);
 });
 
@@ -181,9 +181,9 @@ test('"Lautstärke wie das Original": a quiet sound gets the loudness of the tem
   const peakOf = (c: Float32Array) => c.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
   const kept = await inGameAudio(plan, pack, it, async () => quiet);
   const matched = await inGameAudio(plan, pack, it, async () => quiet, { matchLevel: true });
-  assert.ok(Math.abs(peakOf(kept!.audio.channels[0]) - 0.05) < 0.005, 'off: level of the file');
+  assert.ok(peakOf(kept!.audio.channels[0]) > 0.99, 'off: full scale like a pack made by hand');
   const m = matched!.audio.channels[0];
-  assert.ok(rms(m) > rms(kept!.audio.channels[0]) * 5, 'on: clearly louder');
+  assert.ok(rms(m) > rms(quiet.channels[0]) * 5, 'on: clearly louder than the file');
   assert.ok(peakOf(m) <= 1.0001, 'never above full scale');
 });
 
