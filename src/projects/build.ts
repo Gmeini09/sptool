@@ -57,7 +57,7 @@ export function planBuild(project: Project, profiles: WeaponProfile[], mapping: 
         if (pack!.groups[gi].awc.streams.some((st) => st.id === m.stream)) targets.push({ group: gi, stream: m.stream });
       }
       const status: SlotStatus = !mapped.length ? 'unmapped' : targets.length ? 'ready' : 'not-in-base';
-      items.push({ weapon: prof.id, weaponLabel: prof.displayName, slot: s.id, slotLabel: s.label, assignment: a, status, targets, files: [...new Set(mapped.map((m) => m.file))] });
+      items.push({ weapon: prof.id, weaponLabel: s.type === 'kill' ? 'Alle Waffen' : prof.displayName, slot: s.id, slotLabel: s.label, assignment: a, status, targets, files: [...new Set(mapped.map((m) => m.file))] });
     }
   }
   const ready = items.filter((i) => i.status === 'ready').length;
