@@ -29,6 +29,7 @@ const SLOT_META: Record<string, { type: SoundType; component?: string }> = {
   dry_fire: { type: 'mechanical', component: 'Dry Fire' },
   draw: { type: 'handling', component: 'Weapon Draw' },
   holster: { type: 'handling', component: 'Weapon Holster' },
+  kill: { type: 'kill' },
 };
 
 let ctx: AudioContext | null = null;
