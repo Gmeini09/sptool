@@ -2,7 +2,7 @@ import type { EditState } from '../dsp/chain';
 import type { SynthParams } from '../synth/synth';
 
 export type WeaponId = 'pistol' | 'pistol_mk2' | 'pistol50';
-export type SoundType = 'fire' | 'suppressor' | 'reload' | 'mechanical' | 'handling';
+export type SoundType = 'fire' | 'suppressor' | 'reload' | 'mechanical' | 'handling' | 'kill';
 export type Style =
   | 'Clean' | 'Heavy' | 'Deep' | 'Punchy' | 'Competitive' | 'Realistic' | 'Aggressive' | 'Arcade' | 'Bass'
   | 'Short' | 'Sharp' | 'Modern' | 'Tactical' | 'Dry' | 'Metallic' | 'Soft' | 'Fast' | 'Cracky' | 'Echo' | 'Balanced' | 'Dense' | 'Bright'
@@ -85,4 +85,5 @@ export const TYPE_LABEL: Record<SoundType, string> = {
   reload: 'Nachladen',
   mechanical: 'Mechanik',
   handling: 'Handhabung',
+  kill: 'Kill-Sound',
 };
