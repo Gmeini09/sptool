@@ -24,14 +24,24 @@ export const ALL_PATTERN: Pattern = { beeps: 2, freq: 1200, label: 'Piep-Piep' }
 /** At most this many candidates get one pattern each (a final, exact round); GTA keeps several variations of a shot. */
 export const FOUND_AT = PATTERNS.length;
 
-/** What the tester does in the game: shoot, shoot with suppressor, reload. A target is "weapon:event". */
-export type SearchEvent = 'fire' | 'suppressed_fire' | 'reload';
-export const EVENTS: Array<{ id: SearchEvent; label: string; action: string }> = [
+/**
+ * What the tester does in the game: shoot, shoot with suppressor, reload, kill. A target is "weapon:event".
+ * global: one sound for every weapon (the kill sound) – searched once, stored under the Pistol.
+ */
+export type SearchEvent = 'fire' | 'suppressed_fire' | 'reload' | 'kill';
+export const EVENTS: Array<{ id: SearchEvent; label: string; action: string; global?: boolean }> = [
   { id: 'fire', label: 'Schuss', action: '3–4 Mal schießen' },
   { id: 'suppressed_fire', label: 'Schuss mit Schalldämpfer', action: 'Schalldämpfer drauf, 3–4 Mal schießen' },
   { id: 'reload', label: 'Nachladen', action: '1–2 Mal nachladen (R)' },
+  { id: 'kill', label: 'Kill-Sound', action: '2–3 NPCs töten und nur auf den Piep im Moment des Kills achten (nicht auf den Schuss)', global: true },
 ];
+export const GLOBAL_WEAPON: WeaponId = 'pistol';
 export const target = (w: WeaponId, e: SearchEvent) => `${w}:${e}`;
+/** Targets for the chosen events: weapon events once per weapon, global events (kill) once. */
+export const targetsFor = (weapons: WeaponId[], events: SearchEvent[]) => [
+  ...weapons.flatMap((w) => events.filter((e) => !EVENTS.find((x) => x.id === e)?.global).map((e) => target(w, e))),
+  ...events.filter((e) => EVENTS.find((x) => x.id === e)?.global).map((e) => target(GLOBAL_WEAPON, e)),
+];
 export const splitTarget = (t: string) => { const [weapon, event] = t.split(':'); return { weapon: weapon as WeaponId, event: event as SearchEvent }; };
 
 export interface SearchState {

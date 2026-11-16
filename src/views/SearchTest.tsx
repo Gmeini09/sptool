@@ -7,7 +7,7 @@ import { BasePicker, useBase } from '../components/BasePicker';
 import { Icon } from '../components/Icon';
 import { Button, DoneMark } from '../components/ui';
 import { loadMapping, saveMapping } from '../formats/mapping';
-import { active, applyRound, applySearch, buildRound, EVENTS, isFound, loadSearch, PATTERNS, saveSearch, splitTarget, startSearch, target, type SearchEvent, type SearchState } from '../projects/searchTest';
+import { active, applyRound, applySearch, buildRound, EVENTS, isFound, loadSearch, PATTERNS, saveSearch, splitTarget, startSearch, targetsFor, type SearchEvent, type SearchState } from '../projects/searchTest';
 import { publishMapping } from '../services/mappingSync';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { showSfxFolder } from '../services/modsCheck';
@@ -17,8 +17,11 @@ import type { WeaponId } from '../models/types';
 
 const WEAPONS = WEAPON_PROFILES.map((w) => w.id as WeaponId);
 const wName = (w: string) => WEAPON_PROFILES.find((p) => p.id === w)?.displayName ?? w;
-/** "pistol50:reload" → "Pistol .50 · Nachladen" */
-const label = (t: string) => { const { weapon, event } = splitTarget(t); return `${wName(weapon)} · ${EVENTS.find((e) => e.id === event)?.label ?? event}`; };
+/** "pistol50:reload" → "Pistol .50 · Nachladen"; a global event (kill) → "Kill-Sound (alle Waffen)" */
+const label = (t: string) => {
+  const { weapon, event } = splitTarget(t), ev = EVENTS.find((e) => e.id === event);
+  return ev?.global ? `${ev.label} (alle Waffen)` : `${wName(weapon)} · ${ev?.label ?? event}`;
+};
 
 export function SearchTest({ busy, setBusy }: { busy: string | null; setBusy: (s: string | null) => void }) {
   const admin = useAccount(isAdmin);
@@ -28,7 +31,7 @@ export function SearchTest({ busy, setBusy }: { busy: string | null; setBusy: (s
   const [heard, setHeard] = useState<Record<string, number[]>>({});
   const [done, setDone] = useState<{ found: string[]; published: number | null } | null>(null);
   const [events, setEvents] = useState<SearchEvent[]>(['fire', 'suppressed_fire', 'reload']);
-  const targets = () => WEAPONS.flatMap((w) => events.map((e) => target(w, e)));
+  const targets = () => targetsFor(WEAPONS, events);
   const set = (s: SearchState | null) => { setSt(s); saveSearch(s); };
 
   const build = async (s: SearchState) => {
@@ -136,7 +139,7 @@ export function SearchTest({ busy, setBusy }: { busy: string | null; setBusy: (s
     <ol className="gt-steps muted">
       <li><b>FiveM ganz schließen.</b></li>
       <li>Aus <b>Suchtest Runde {st.round + 1}.zip</b> beide Dateien in deinen sfx-Ordner ziehen und <b>ersetzen</b>. <button className="link" onClick={() => void showSfxFolder()}>sfx-Ordner öffnen</button></li>
-      <li>FiveM starten – am besten <b>Story Mode</b> – und mit jeder Pistole: {EVENTS.filter((e) => evs.includes(e.id)).map((e) => e.action).join(' · ')}.</li>
+      <li>FiveM starten – am besten <b>Story Mode</b> – und mit jeder Pistole: {EVENTS.filter((e) => evs.includes(e.id) && !e.global).map((e) => e.action).join(' · ')}.{EVENTS.filter((e) => evs.includes(e.id) && e.global).map((e) => <span key={e.id}> <b>{e.label}:</b> {e.action}.</span>)}</li>
       <li>{r0 ? 'Anklicken, ob es gepiept hat.' : <>Alles anklicken, was du gehört hast – wenn es sich zwischen den Schüssen ändert, mehrere. Beim <b>Nachladen</b> in der Reihenfolge, in der die Pieptöne kamen.</>}</li>
     </ol>
     <div className="gt-questions">
@@ -146,7 +149,7 @@ export function SearchTest({ busy, setBusy }: { busy: string | null; setBusy: (s
           <div className="seg" role="group" aria-label={label(w)} style={{ flexWrap: 'wrap' }}>
             {r0 ? <>
               <button className={heard[w]?.length ? 'on' : ''} onClick={() => setHeard((h) => ({ ...h, [w]: [0] }))}>Piept</button>
-              <button className={heard[w] && !heard[w].length ? 'on' : ''} onClick={() => setHeard((h) => ({ ...h, [w]: [] }))}>Normaler Schuss</button>
+              <button className={heard[w] && !heard[w].length ? 'on' : ''} onClick={() => setHeard((h) => ({ ...h, [w]: [] }))}>{splitTarget(w).event === 'kill' ? 'Kein Piep beim Kill' : 'Normaler Schuss'}</button>
             </> : <>
               {PATTERNS.map((p, i) => <button key={p.label} aria-pressed={!!heard[w]?.includes(i)} className={heard[w]?.includes(i) ? 'on' : ''} onClick={() => toggle(w, i)}>{splitTarget(w).event === 'reload' && heard[w]?.includes(i) ? `${heard[w].indexOf(i) + 1}. ` : ''}{p.label}</button>)}
               <button className={heard[w] && !heard[w].length ? 'on' : ''} onClick={() => setHeard((h) => ({ ...h, [w]: [] }))}>Weiß nicht</button>

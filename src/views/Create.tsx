@@ -25,7 +25,7 @@ import { soundReport } from '../projects/report';
 import { SAME_SOUND, blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { SoundEditorOverlay } from './Editor';
 import { openPack, type Pack } from '../formats/pack';
-import { streamToAudio } from '../formats/awc';
+import { gameAudio, streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
@@ -40,29 +40,34 @@ const RELOAD_SLOTS = ['mag_out', 'mag_in', 'slide', 'reload_finish'] as const;
 const RELOAD_LABEL: Record<string, string> = { mag_out: 'Magazin raus', mag_in: 'Magazin rein', slide: 'Schlitten', reload_finish: 'Nachladen fertig' };
 const ORIGINAL = 'original';
 const label = (w: WeaponId) => WEAPON_PROFILES.find((p) => p.id === w)!.displayName;
-const STEPS = [...WEAPONS.map(label), 'Nachladen', 'Fertig'];
-const RELOAD_STEP = WEAPONS.length, DONE_STEP = WEAPONS.length + 1;
+const STEPS = [...WEAPONS.map(label), 'Nachladen', 'Kill-Sound', 'Fertig'];
+const RELOAD_STEP = WEAPONS.length, KILL_STEP = WEAPONS.length + 1, DONE_STEP = WEAPONS.length + 2;
+// the kill sound is one sound for every weapon; the project keeps it on the Pistol (see GLOBAL_WEAPON in searchTest)
+const KILL_WEAPON: WeaponId = 'pistol', KILL_SLOT = 'kill';
+
+/** Every play button here plays the sound the way the build writes it into the game file. */
+const hear = (e: LibraryEntry) => previewEntry(e, { inGame: true });
 
 type ReloadMode = 'whole' | 'single' | 'none';
 interface ReloadChoice { mode: ReloadMode; split: boolean; whole: Record<string, string> | null; single: Record<string, string | null>; weapons: WeaponId[] }
 
 const entriesFor = (lib: LibraryEntry[], w: WeaponId, slot: string) => lib.filter((e) => slotMatches(e, w, slot));
 
-/** Plays the reload parts one after another. */
+/** Plays the reload parts one after another – each as it goes into the game (mono, 1 : 1). */
 async function playSequence(ids: string[]) {
   const parts: AudioData[] = [];
-  for (const id of ids) if (id && id !== SILENCE) parts.push(await renderAssignment({ entryId: id }));
+  for (const id of ids) if (id && id !== SILENCE) parts.push(gameAudio(await renderAssignment({ entryId: id })));
   if (!parts.length) return;
   const sr = parts[0].sampleRate, gap = Math.round(sr * 0.3);
   const len = parts.reduce((n, p) => n + Math.round(p.channels[0].length * sr / p.sampleRate) + gap, 0);
-  const out = [new Float32Array(len), new Float32Array(len)];
+  const out = new Float32Array(len);
   let pos = 0;
   for (const p of parts) {
-    const ratio = p.sampleRate / sr, n = Math.round(p.channels[0].length / ratio);
-    for (let ch = 0; ch < 2; ch++) { const src = p.channels[Math.min(ch, p.channels.length - 1)]; for (let i = 0; i < n; i++) out[ch][pos + i] = src[Math.min(src.length - 1, Math.floor(i * ratio))]; }
+    const ratio = p.sampleRate / sr, n = Math.round(p.channels[0].length / ratio), src = p.channels[0];
+    for (let i = 0; i < n; i++) out[pos + i] = src[Math.min(src.length - 1, Math.floor(i * ratio))];
     pos += n + gap;
   }
-  engine.play({ sampleRate: sr, channels: out }, { key: `seq:${ids.join(',')}` });
+  engine.play({ sampleRate: sr, channels: [out] }, { key: `seq:${ids.join(',')}` });
 }
 
 /** Drop zone + button for audio files (any format). */
@@ -83,7 +88,7 @@ function AudioDrop({ title, hint, multiple, onFiles }: { title: string; hint: st
 function SoundRow({ e, sel, onPick, playing, extra }: { e: LibraryEntry; sel: boolean; onPick: () => void; playing: string | null; extra?: string }) {
   return (
     <div className={`create-item${sel ? ' sel' : ''}`} onClick={onPick}>
-      <button className={`play-btn${playing === e.id ? ' playing' : ''}`} aria-label="Anhören" onClick={(ev) => { ev.stopPropagation(); if (playing === e.id) engine.stop(); else void previewEntry(e); }}><Icon name={playing === e.id ? 'stop' : 'play'} size={12} /></button>
+      <button className={`play-btn${playing === e.id ? ' playing' : ''}`} aria-label="Anhören" onClick={(ev) => { ev.stopPropagation(); if (playing === e.id) engine.stop(); else void hear(e); }}><Icon name={playing === e.id ? 'stop' : 'play'} size={12} /></button>
       <span className="grow ellipsis">{e.name}</span>
       {extra && <span className="faint small">{extra}</span>}
       {sel && <span className="chip ok"><Icon name="check" size={12} />gewählt</span>}
@@ -101,6 +106,7 @@ export function CreateView() {
   const [style, setStyle] = useState<Style | 'all' | 'featured'>('all');
   const [fire, setFire] = useState<Record<string, string | null>>({});
   const [reload, setReload] = useState<ReloadChoice>({ mode: 'whole', split: true, whole: null, single: {}, weapons: [...WEAPONS] });
+  const [kill, setKill] = useState<string | null>(null); // null = original
   const [name, setName] = useState('Mein Soundpack');
   const [busy, setBusy] = useState<string | null>(null);
   const [prog, setProg] = useState<number | null>(null);
@@ -179,12 +185,13 @@ export function CreateView() {
         else if (reload.mode === 'whole' && !reload.split && rel.mag_out) p = assign(p, w, s, { entryId: SILENCE });
       }
     }
+    if (kill) p = assign(p, KILL_WEAPON, KILL_SLOT, { entryId: kill });
     return p;
   };
   // plan anew when the mapping changes (in-game test saved, mapping published by an admin)
   const [mapRev, setMapRev] = useState(0);
   useEffect(() => { const f = () => setMapRev((n) => n + 1); window.addEventListener(MAPPING_EVENT, f); return () => window.removeEventListener(MAPPING_EVENT, f); }, []);
-  const plan = useMemo(() => planBuild(project(), WEAPON_PROFILES, loadMapping(), base?.pack ?? null), [fire, reload, name, base, mapRev]);
+  const plan = useMemo(() => planBuild(project(), WEAPON_PROFILES, loadMapping(), base?.pack ?? null), [fire, reload, kill, name, base, mapRev]);
   const ok = (i: PlanItem) => i.status === 'ready' || (!base && i.status === 'not-in-base') || sharedReload(plan, i);
   // the pack the build writes into: "Reload & Rest" of an SP first, the template fills in a missing archive
   const withRest = (tmpl: Pack | null): Pack | null => rest ? openPack([...rest.pack.archives, ...(tmpl?.archives ?? []).filter((a) => !rest.pack.archives.some((r) => r.name.toLowerCase() === a.name.toLowerCase()))].map((a) => ({ name: a.name, bytes: a.bytes }))) : tmpl;
@@ -196,7 +203,8 @@ export function CreateView() {
   const [editRev, setEditRev] = useState(0); // a sound was edited (also in place): plan the preview anew
   const gameItem = (p: BuildPlan): PlanItem | undefined => cur
     ? p.items.find((i) => i.weapon === cur && i.slot === 'fire')
-    : step === RELOAD_STEP ? p.items.find((i) => RELOAD_SLOTS.includes(i.slot as typeof RELOAD_SLOTS[number]) && i.status === 'ready' && i.assignment.entryId !== SILENCE) : undefined;
+    : step === RELOAD_STEP ? p.items.find((i) => RELOAD_SLOTS.includes(i.slot as typeof RELOAD_SLOTS[number]) && i.status === 'ready' && i.assignment.entryId !== SILENCE)
+    : step === KILL_STEP ? p.items.find((i) => i.weapon === KILL_WEAPON && i.slot === KILL_SLOT) : undefined;
   const gameKey = (i: PlanItem) => `ingame:${i.weapon}:${i.slot}:${i.assignment.entryId}`;
   useEffect(() => {
     setInGame(null);
@@ -206,7 +214,7 @@ export function CreateView() {
     let live = true;
     void inGameAudio(p, quickPack, it, renderAssignment).then((info) => { if (live && info) setInGame({ key: gameKey(it), info }); }).catch((e) => logger.warn(`Im-Spiel-Vorschau: ${e instanceof Error ? e.message : String(e)}`));
     return () => { live = false; };
-  }, [fire, reload, quickPack, mapRev, step, editRev]);
+  }, [fire, reload, kill, quickPack, mapRev, step, editRev]);
   const playInGame = async () => {
     if (inGame && engine.playingKey === inGame.key) { engine.stop(); return; }
     engine.unlock();
@@ -235,6 +243,7 @@ export function CreateView() {
   const [editing, setEditing] = useState<{ id: string; put: (id: string) => void } | null>(null);
   const editTarget = (): { id: string; put: (id: string) => void } | null => {
     if (cur) { const id = fire[cur]; const w = cur; return id && id !== ORIGINAL ? { id, put: (n) => pickFire(w, n) } : null; }
+    if (step === KILL_STEP) return kill ? { id: kill, put: (n) => setKill(n) } : null;
     const rel = reloadIds();
     const k = RELOAD_SLOTS.find((s) => rel[s] && rel[s] !== SILENCE);
     if (!k) return null;
@@ -247,7 +256,7 @@ export function CreateView() {
     const it = gameItem(p), alias = it && SAME_SOUND[`${it.weapon}:${it.slot}`];
     return it && it.status !== 'ready' && alias ? p.items.find((o) => o.weapon === alias.weapon && o.slot === alias.slot && o.status === 'ready') ?? it : it;
   };
-  const origItem = quickPack && (cur || step === RELOAD_STEP) ? origOf(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack)) : undefined;
+  const origItem = quickPack && (cur || step === RELOAD_STEP || step === KILL_STEP) ? origOf(planBuild(project(), WEAPON_PROFILES, loadMapping(), quickPack)) : undefined;
   const origMissing = !!quickPack && !!origItem && origItem.status !== 'ready';
   const playOriginal = () => {
     const key = 'ingame:original';
@@ -275,7 +284,7 @@ export function CreateView() {
       <Button size="sm" icon={playing && inGame && playing === inGame.key ? 'stop' : 'gamepad'} disabled={!!busy} onClick={() => void playInGame()}>So klingt es im Spiel</Button>
       <Button size="sm" icon="wave" disabled={!!busy || !editTarget()} title="Diesen Sound kürzen, lauter/leiser machen, Effekte … – das Original bleibt unverändert" onClick={() => { engine.stop(); setEditing(editTarget()); }}>Bearbeiten</Button>
       <Button size="sm" variant="ghost" icon={playing === 'ingame:original' ? 'stop' : 'play'} disabled={!!busy || !quickPack || origMissing} title={origMissing ? (origItem!.status === 'unmapped' ? `Noch unbekannt, welche Datei GTA für ${origItem!.weaponLabel} · ${origItem!.slotLabel} abspielt – der Suchtest im Spiel findet sie` : 'Diesen Sound gibt es in deiner Vorlage nicht') : 'Der Sound, der jetzt an dieser Stelle in deiner Vorlage steckt'} onClick={playOriginal}>Original</Button>
-      <span className="small muted grow">1 : 1 wie deine Datei – Länge, Abtastrate und Lautstärke bleiben, nur Mono wie im Spiel.</span>
+      <span className="small muted grow">Jeder Abspiel-Knopf hier spielt deinen Sound so, wie er in die Spieldatei kommt: Mono wie im Spiel, Länge, Abtastrate und Lautstärke 1 : 1 wie deine Datei.</span>
       {editing && <SoundEditorOverlay entryId={editing.id} onClose={() => setEditing(null)} onSaved={(id) => { editing.put(id); setEditing(null); setEditRev((n) => n + 1); }} />}
       {needBase && !quickPack && <div style={{ width: '100%' }}><div className="qp-label">Einmalig: ein Soundpack als Vorlage</div><BasePicker autoSearch={false} /></div>}
       {inGame && (!inGame.info.fits || inGame.info.monoLossDb < -6) && (
@@ -336,7 +345,7 @@ export function CreateView() {
     const r = await importSorted(files, cur);
     setBusy(null);
     setRecog(r.files);
-    if (r.shots[0]) { pickFire(cur, r.shots[0].id); void previewEntry(r.shots[0]); }
+    if (r.shots[0]) { pickFire(cur, r.shots[0].id); void hear(r.shots[0]); }
     const rel = Object.fromEntries(Object.entries(r.reload).map(([k, e]) => [k, e.id]));
     if (Object.keys(rel).length) setReload((x) => ({ ...x, mode: 'single', single: { ...x.single, ...rel } }));
     const parts = [r.shots.length ? `${r.shots.length} Schuss${r.shots.length > 1 ? '-Sounds' : ''}${r.shots[0] ? ` → ${label(cur)}` : ''}` : '', Object.keys(rel).length ? `${Object.keys(rel).length} Nachlade-Teil${Object.keys(rel).length > 1 ? 'e' : ''} (${Object.keys(rel).map((k) => RELOAD_LABEL[k]).join(', ')}) → Schritt „Nachladen“` : ''].filter(Boolean);
@@ -351,6 +360,10 @@ export function CreateView() {
       lastReload.current = audio[0];
       setReload((r) => ({ ...r, mode: 'whole' }));
       void importReload(audio[0], reload.split);
+      return true;
+    }
+    if (step === KILL_STEP) {
+      void importAudioFiles(audio.slice(0, 1), { weapon: 'universal', slot: KILL_SLOT }).then((es) => { if (es[0]) { setKill(es[0].id); void hear(es[0]); } });
       return true;
     }
     return false;
@@ -520,7 +533,7 @@ export function CreateView() {
               <span className="grow"><b>Original behalten</b> <span className="faint small">– kein neuer Schuss, im Spiel bleibt der GTA-Sound</span></span>
               {fire[cur] === ORIGINAL && <span className="chip ok"><Icon name="check" size={12} />gewählt</span>}
             </div>
-            {ownFire(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : 'importiert'} onPick={() => { pickFire(cur, e.id); void previewEntry(e); }} />)}
+            {ownFire(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : 'importiert'} onPick={() => { pickFire(cur, e.id); void hear(e); }} />)}
           </div>
           {imported(cur).length > 0 && (
             <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -539,7 +552,7 @@ export function CreateView() {
               {(['all', ...(lib.some((e) => e.featured) ? ['featured'] : []), ...new Set(entriesFor(lib, cur, 'fire').filter((e) => e.source !== 'imported').map((e) => e.style))] as Array<Style | 'all' | 'featured'>).map((s) => <button key={s} className={`chip${style === s ? ' accent' : ''}`} onClick={() => setStyle(s)}>{s === 'all' ? 'Alle' : s === 'featured' ? '★ Empfohlen' : s}</button>)}
             </div>
             <div className="create-list">
-              {fireLib(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.featured ? `★ ${e.style}` : e.style} onPick={() => { pickFire(cur, e.id); void previewEntry(e); }} />)}
+              {fireLib(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.featured ? `★ ${e.style}` : e.style} onPick={() => { pickFire(cur, e.id); void hear(e); }} />)}
             </div>
           </>}
           {cur && SAME_SOUND[`${cur}:fire`] && (() => {
@@ -595,7 +608,7 @@ export function CreateView() {
             {reload.whole && !reload.split && (
               <div className="create-parts">
                 <div className="create-part grow"><span className="small muted">Ganzer Reload (ein Sound)</span><span>{nameOf(reload.whole.mag_out)}</span></div>
-                <Button size="sm" variant="ghost" icon="play" onClick={() => { const e = lib.find((x) => x.id === reload.whole?.mag_out); if (e) void previewEntry(e); }}>Anhören</Button>
+                <Button size="sm" variant="ghost" icon="play" onClick={() => { const e = lib.find((x) => x.id === reload.whole?.mag_out); if (e) void hear(e); }}>Anhören</Button>
               </div>
             )}
             {reload.whole && reload.split && (
@@ -603,7 +616,7 @@ export function CreateView() {
                 {RELOAD_SLOTS.map((s) => (
                   <div key={s} className="create-part">
                     <span className="small muted">{RELOAD_LABEL[s]}</span>
-                    {reload.whole![s] ? <button className="link-like small" onClick={() => { const e = lib.find((x) => x.id === reload.whole![s]); if (e) void previewEntry(e); }}><Icon name="play" size={11} /> {nameOf(reload.whole![s])}</button> : <span className="faint small">– (Original)</span>}
+                    {reload.whole![s] ? <button className="link-like small" onClick={() => { const e = lib.find((x) => x.id === reload.whole![s]); if (e) void hear(e); }}><Icon name="play" size={11} /> {nameOf(reload.whole![s])}</button> : <span className="faint small">– (Original)</span>}
                   </div>
                 ))}
                 <Button size="sm" variant="ghost" icon="play" onClick={() => void playSequence(RELOAD_SLOTS.map((k) => reload.whole?.[k] ?? ''))}>Alles anhören</Button>
@@ -613,7 +626,7 @@ export function CreateView() {
             <div className="create-list compact">
               {[...editedReloads(), ...freeReloads()].map((e) => {
                 const sel = !reload.split && reload.whole?.mag_out === e.id;
-                return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : `von ${e.creator}`} onPick={() => { setReload((r) => ({ ...r, split: false, whole: { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE } })); void previewEntry(e); }} />;
+                return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : `von ${e.creator}`} onPick={() => { setReload((r) => ({ ...r, split: false, whole: { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE } })); void hear(e); }} />;
               })}
             </div>
           </>}
@@ -629,12 +642,12 @@ export function CreateView() {
               <div className="row" style={{ gap: 8 }}><b className="grow">{RELOAD_LABEL[slot]}</b><span className="small muted">{reload.single[slot] ? nameOf(reload.single[slot]) : 'Original'}</span></div>
               <AudioDrop title={`${RELOAD_LABEL[slot]} importieren`} hint="Audiodatei reinziehen oder klicken." onFiles={async (files) => {
                 const es = await importAudioFiles(files.slice(0, 1), { weapon: 'universal', slot });
-                if (es[0]) { setReload((r) => ({ ...r, single: { ...r.single, [slot]: es[0].id } })); void previewEntry(es[0]); }
+                if (es[0]) { setReload((r) => ({ ...r, single: { ...r.single, [slot]: es[0].id } })); void hear(es[0]); }
               }} />
               <div className="create-list compact">
                 {entriesFor(lib, 'pistol', slot).filter((e) => e.source !== 'builtin').map((e) => {
                   const sel = reload.single[slot] === e.id;
-                  return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'imported' ? 'importiert' : undefined} onPick={() => { setReload((r) => ({ ...r, single: { ...r.single, [slot]: sel ? null : e.id } })); if (!sel) void previewEntry(e); }} />;
+                  return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'imported' ? 'importiert' : undefined} onPick={() => { setReload((r) => ({ ...r, single: { ...r.single, [slot]: sel ? null : e.id } })); if (!sel) void hear(e); }} />;
                 })}
               </div>
             </div>
@@ -657,6 +670,40 @@ export function CreateView() {
         </div></div>
       )}
 
+      {step === KILL_STEP && (() => {
+        const it = plan.items.find((i) => i.weapon === KILL_WEAPON && i.slot === KILL_SLOT);
+        const kills = lib.filter((e) => e.type === 'kill' && !e.hidden).sort((a, b) => b.createdAt - a.createdAt);
+        return (
+          <div className="panel"><div className="panel-body">
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <h3 className="grow" style={{ margin: 0 }}>Kill-Sound</h3>
+              <span className="small muted">Gewählt: <b>{kill ? nameOf(kill) : 'Original'}</b></span>
+            </div>
+            <p className="small muted" style={{ marginTop: 0 }}>Ein Sound für alle Waffen – er kommt dort ins Pack, wo GTA beim Kill den Sound abspielt.</p>
+            <div className="create-sources">
+              <AudioDrop title="Kill-Sound importieren" hint="MP3, WAV, OGG, M4A, FLAC … reinziehen oder klicken." onFiles={async (files) => {
+                const es = await importAudioFiles(files.slice(0, 1), { weapon: 'universal', slot: KILL_SLOT });
+                if (es[0]) { setKill(es[0].id); void hear(es[0]); }
+              }} />
+            </div>
+            <div className="create-list">
+              <div className={`create-item original${!kill ? ' sel' : ''}`} onClick={() => { engine.stop(); setKill(null); }}>
+                <span className="play-btn ghost"><Icon name="undo" size={12} /></span>
+                <span className="grow"><b>Original behalten</b> <span className="faint small">– im Spiel bleibt der Kill-Sound der Vorlage</span></span>
+                {!kill && <span className="chip ok"><Icon name="check" size={12} />gewählt</span>}
+              </div>
+              {kills.map((e) => <SoundRow key={e.id} e={e} sel={kill === e.id} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : 'importiert'} onPick={() => { setKill(e.id); void hear(e); }} />)}
+            </div>
+            {kill && it && !ok(it) && (
+              it.status === 'not-in-base'
+                ? <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div>Deine Vorlage enthält die Datei mit dem Kill-Sound nicht. Nimm als Vorlage ein Soundpack mit WEAPONS_PLAYER.rpf und RESIDENT.rpf.</div></div>
+                : <div className="callout small" style={{ marginTop: 12 }}><Icon name="gamepad" size={16} /><div className="grow">Wird mit gespeichert, wirkt im Spiel aber erst, wenn SP Tool weiß, welcher GTA-Sound beim Kill kommt. Mach den <b>Test im Spiel</b> und wähl dort <b>Kill-Sound</b> (ein paar NPCs töten, Pieptöne anklicken) – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>
+            )}
+            {kill && inGameHint}
+          </div></div>
+        );
+      })()}
+
       {step === DONE_STEP && (
         <div className="panel"><div className="panel-body">
           <h3 style={{ marginTop: 0 }}>Fertig machen</h3>
@@ -666,7 +713,7 @@ export function CreateView() {
               <div key={w} className="cs-weapon">
                 <b>{label(w)}</b>
                 {fire[w] === ORIGINAL && <div className="cs-row muted"><Icon name="undo" size={13} /><span className="grow">Schuss: {rest ? `wie in „${rest.label}“` : 'Original'}</span></div>}
-                {plan.items.filter((i) => i.weapon === w && !(i.assignment.entryId === SILENCE && !ok(i))).map((i) => (
+                {plan.items.filter((i) => i.weapon === w && i.slot !== KILL_SLOT && !(i.assignment.entryId === SILENCE && !ok(i))).map((i) => (
                   <div key={i.slot} className={`cs-row ${ok(i) ? '' : 'muted'}`}>
                     <Icon name={ok(i) ? 'check' : 'lock'} size={13} />
                     <span className="grow">{i.slotLabel}: {nameOf(i.assignment.entryId)}</span>
@@ -677,6 +724,16 @@ export function CreateView() {
               </div>
             ))}
           </div>
+          {(() => {
+            const it = plan.items.find((i) => i.weapon === KILL_WEAPON && i.slot === KILL_SLOT);
+            return (
+              <div className={`cs-row ${!it || ok(it) ? '' : 'muted'}`} style={{ marginBottom: 8 }}>
+                <Icon name={!it ? 'undo' : ok(it) ? 'check' : 'lock'} size={13} />
+                <span className="grow">Kill-Sound: {it ? nameOf(it.assignment.entryId) : 'Original'}</span>
+                {it && !ok(it) && <span className="faint small">noch ohne Wirkung</span>}
+              </div>
+            );
+          })()}
           {rest && <div className="cs-row" style={{ marginBottom: 8 }}><Icon name="layers" size={13} /><span className="grow">Reload & Rest: 1:1 aus „{rest.label}“</span></div>}
           {!plan.items.length && !rest && <div className="callout small"><Icon name="info" size={16} /><div>Alles steht auf „Original“ – es gibt nichts zu erstellen. Wähl bei mindestens einer Waffe einen Schuss.</div></div>}
           {plan.items.length > 0 && !rest && !plan.items.some(ok) && <div className="callout small"><Icon name="info" size={16} /><div className="grow">Deine Auswahl wirkt im Spiel noch nicht: SP Tool weiß noch nicht, wo GTA {blockedLabels(plan).join(', ')} ablegt. Wähl bei der Pistol einen Schuss oder finde es mit dem <b>Test im Spiel</b> heraus.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>}

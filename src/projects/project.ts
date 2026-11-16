@@ -56,7 +56,8 @@ export function validateProject(p: Project, profiles: WeaponProfile[]): Validati
   const problems: ValidationResult['problems'] = [];
   for (const prof of profiles) {
     const w = p.weapons[prof.id] ?? {};
-    if (!Object.keys(w).length) continue; // untouched weapon keeps original sounds
+    // untouched weapon keeps original sounds; the kill sound alone does not change the weapon's own sounds
+    if (!prof.slots.some((s) => s.type !== 'kill' && w[s.id])) continue;
     for (const s of prof.slots) if (s.required && !w[s.id]) problems.push({ weapon: prof.displayName, slot: s.id, message: `${prof.displayName}: Pflicht-Slot „${s.label}“ ist leer.`, fix: DERIVE_FROM[s.id] && w[DERIVE_FROM[s.id]] ? 'derive' : undefined });
     for (const i of checkAttachmentCoverage(prof, new Set(Object.keys(w)))) {
       if (!problems.some((x) => x.weapon === prof.displayName && x.slot === i.slot)) problems.push({ weapon: prof.displayName, slot: i.slot, message: i.message, fix: i.deriveFrom ? 'derive' : undefined });
@@ -90,6 +91,7 @@ export function slotMatches(e: LibraryEntry, weapon: WeaponId, slot: string): bo
     case 'dry_fire': return w && c === 'dry fire';
     case 'draw': return w && c === 'weapon draw';
     case 'holster': return w && c === 'weapon holster';
+    case 'kill': return e.type === 'kill';
     default: return false;
   }
 }

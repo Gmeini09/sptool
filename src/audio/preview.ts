@@ -3,15 +3,17 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { getState, markRecent, toast } from '../app/store';
 import type { LibraryEntry } from '../models/types';
 import { getAudio } from '../library/assets';
+import { gameAudio } from '../formats/awc';
 import { engine } from './engine';
 
-export async function previewEntry(e: LibraryEntry) {
+/** inGame: plays the sound exactly as the build writes it into the game file (mono, 1 : 1). */
+export async function previewEntry(e: LibraryEntry, opts: { inGame?: boolean } = {}) {
   if (engine.playingKey === e.id) { engine.stop(); return; }
   engine.unlock(); // still inside the click – before the async render
   try {
     engine.setVolume(getState().settings.volume);
     const audio = await getAudio(e);
-    engine.play(audio, { key: e.id });
+    engine.play(opts.inGame ? gameAudio(audio) : audio, { key: e.id });
     markRecent(e.id);
   } catch (err) {
     toast('error', `„${e.name}“ konnte nicht abgespielt werden`, err instanceof Error ? err.message : String(err));

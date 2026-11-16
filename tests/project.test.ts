@@ -7,15 +7,18 @@ import { WEAPON_PROFILES } from '../src/weapons/profiles';
 const lib = builtinCatalog();
 const mk2 = WEAPON_PROFILES.find((p) => p.id === 'pistol_mk2')!;
 
-test('every slot of every pistol has library sounds', () => {
-  for (const prof of WEAPON_PROFILES) for (const s of prof.slots) {
+// the kill sound is always the user's own import – the built-in library has none
+const weaponSlots = (prof: (typeof WEAPON_PROFILES)[number]) => prof.slots.filter((s) => s.type !== 'kill');
+
+test('every weapon slot of every pistol has library sounds', () => {
+  for (const prof of WEAPON_PROFILES) for (const s of weaponSlots(prof)) {
     assert.ok(lib.some((e) => slotMatches(e, prof.id, s.id)), `${prof.id}/${s.id}`);
   }
 });
 
 test('auto pack fills all slots in the chosen style and passes validation', () => {
   const p = autoPack(newProject('Heavy', 'me'), WEAPON_PROFILES, lib, 'Heavy', ['pistol', 'pistol_mk2', 'pistol50'], 7);
-  for (const prof of WEAPON_PROFILES) assert.equal(filledCount(p, prof), prof.slots.length, prof.id);
+  for (const prof of WEAPON_PROFILES) assert.equal(filledCount(p, prof), weaponSlots(prof).length, prof.id);
   const fire = lib.find((e) => e.id === p.weapons.pistol_mk2!.fire.entryId)!;
   assert.equal(fire.style, 'Heavy');
   assert.equal(fire.weapon, 'pistol_mk2');

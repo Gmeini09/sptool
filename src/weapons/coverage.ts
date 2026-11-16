@@ -30,7 +30,8 @@ export function deriveEdit(slot: string, base: EditState = freshEdit()): EditSta
  * @param assigned slot ids that the pack provides a sound for (for this weapon)
  */
 export function checkAttachmentCoverage(profile: WeaponProfile, assigned: ReadonlySet<string>): CoverageIssue[] {
-  const touchesWeapon = profile.slots.some((s) => assigned.has(s.id));
+  // the kill sound belongs to no weapon sound set – it alone does not make the pistol a changed weapon
+  const touchesWeapon = profile.slots.some((s) => s.type !== 'kill' && assigned.has(s.id));
   if (!touchesWeapon) return []; // weapon untouched → original sounds stay consistent
   const issues: CoverageIssue[] = [];
   for (const att of profile.attachments) {
