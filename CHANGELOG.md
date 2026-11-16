@@ -6,6 +6,14 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.13 – 16.11.2026
+- Soundpack erstellen: Jeder Abspiel-Knopf spielt deinen Sound jetzt so, wie er ins Spiel kommt – in Mono wie GTA, mit eigener Länge, Abtastrate und Lautstärke. Vorher lief in der Liste die Stereo-Datei, deshalb klang es im Spiel anders als im Creator
+- „Alles anhören“ beim Nachladen spielt die Teile ebenfalls so, wie sie ins Spiel kommen
+- Neu: Kill-Sound – eigener Schritt beim Soundpack erstellen, ein Sound für alle Waffen. Eigenen Sound reinziehen oder „Original behalten“
+- Test im Spiel → Suchtest: Neues Ereignis „Kill-Sound“ (ein paar NPCs töten, die Pieptöne im Moment des Kills anklicken). Erst danach weiß SP Tool, wo GTA den Kill-Sound ablegt – bis dahin steht er auf „noch ohne Wirkung“
+- Ein Pack, das nur den Kill-Sound ändert, verlangt keinen Pistol-Schuss und keinen Schalldämpfer-Sound mehr
+- START-SPTOOL.cmd: Fehlt Node.js, lädt SP Tool einmalig eine portable Version von nodejs.org in den Ordner .node – keine Installation, keine Admin-Rechte
+
 ## 1.10.12 – 28.10.2026
 - Pistol MK2: Der Schuss wurde in die Datei der Pistol .50 (ptl_50cal) geschrieben – behoben. Die MK2 nutzt vermutlich denselben Schuss wie die Pistol (ptl_pistol, noch nicht im Spiel bestätigt); „Original“ spielt ihn. Wählst du nur bei einer der beiden einen Sound, gilt er für beide; bei zwei verschiedenen behält die Pistol ihren, und der MK2-Sound wirkt nach dem Test im Spiel – keine Fehlermeldung
 - Soundpack erstellen: „So klingt es im Spiel“ spielt deinen Sound genau so, wie er in die Spieldatei kommt
