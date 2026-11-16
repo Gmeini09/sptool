@@ -59,6 +59,12 @@
       "label": "Holster",
       "type": "handling",
       "required": false
+    },
+    {
+      "id": "kill",
+      "label": "Kill Sound",
+      "type": "kill",
+      "required": false
     }
   ],
   "audioContainer": null,
