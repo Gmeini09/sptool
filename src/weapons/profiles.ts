@@ -14,6 +14,7 @@ const SLOT_LABEL_DE: Record<string, string> = {
   dry_fire: 'Leerschuss',
   draw: 'Ziehen',
   holster: 'Wegstecken',
+  kill: 'Kill-Sound',
 };
 
 /** German display texts for attachments, by kind. */
