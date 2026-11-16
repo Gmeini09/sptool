@@ -209,6 +209,20 @@ export function replaceStreamAudio(orig: AwcStream, audio: AudioData, opts: { ke
 const mixToMono = (a: AudioData) => monoMix(a).mono;
 
 /**
+ * The sound as the build writes it into a stream (replaceStreamAudio with normalize: false): mono mix-down, own
+ * rate, own length, own level – only a sound above full scale is brought down. Used so previews match the game.
+ */
+export function gameAudio(a: AudioData): AudioData {
+  const mono = mixToMono(a);
+  let peak = 0;
+  for (let i = 0; i < mono.length; i++) { const x = Math.abs(mono[i]); if (x > peak) peak = x; }
+  if (peak <= 1) return { sampleRate: a.sampleRate, channels: [mono] };
+  const out = new Float32Array(mono.length);
+  for (let i = 0; i < mono.length; i++) out[i] = mono[i] / peak;
+  return { sampleRate: a.sampleRate, channels: [out] };
+}
+
+/**
  * Mono for the game (GTA plays these streams in mono): the average of the channels – unless they cancel each other
  * out (more than 6 dB lost, e.g. a phase-inverted channel), then the loudest channel alone.
  * lossDb: level the written mono loses against the stereo sound (≤ 0).
