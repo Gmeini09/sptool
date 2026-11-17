@@ -6,8 +6,6 @@ import { WHOLE_RELOAD } from './turbo';
 const FREE: Array<[id: string, name: string, creator: string, page: string, file: string, dur: number]> = [
   ['free-reload-1', 'Pistole nachladen (Magazin + Schlitten)', 'zer0_sol', 'https://opengameart.org/content/handgun-reload-sound-effect', 'reload-zer0sol.wav', 1.59],
   ['free-reload-2', 'Pistole nachladen (Airsoft)', 'SpringySpringo', 'https://opengameart.org/content/gun-reload-sounds', 'reload-springyspringo.wav', 1.58],
-  ['free-reload-3', 'Magazin-Klick 1', 'BMacZero', 'https://opengameart.org/content/gun-reload-sound-effects', 'clip-bmaczero-1.wav', 0.26],
-  ['free-reload-4', 'Magazin-Klick 2', 'BMacZero', 'https://opengameart.org/content/gun-reload-sound-effects', 'clip-bmaczero-2.wav', 0.21],
 ];
 
 let cached: LibraryEntry[] | null = null;
