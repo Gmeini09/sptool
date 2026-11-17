@@ -157,7 +157,8 @@ function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | nul
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
   const streams = new Map<number, AwcStream>();
   for (const [id, audio] of wanted) streams.set(id, audio ? exactStream(orig(id), audio) : silentStream(orig(id)));
-  const size = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }).length;
+  // same sound in several streams (one reload for all pistols) is stored once – exportPack writes it that way too
+  const size = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }, { share: true }).length;
   return { streams, over: Math.max(0, size - g.length) };
 }
 

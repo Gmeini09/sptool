@@ -5,11 +5,12 @@ import assert from 'node:assert/strict';
 (globalThis as unknown as { localStorage: unknown }).localStorage ??= { getItem: () => null, setItem() {}, removeItem() {}, key: () => null, length: 0 };
 const { synthPack } = await import('./synthPack');
 const { openPack } = await import('../src/formats/pack');
-const { gameAudio, streamToAudio } = await import('../src/formats/awc');
+const { gameAudio, streamToAudio, parseAwc, writeAwc, replaceStreamAudio } = await import('../src/formats/awc');
 const { planBuild, runBuild, indexPack, inGameAudio } = await import('../src/projects/build');
 const { allKeys, applySearch, targetsFor } = await import('../src/projects/searchTest');
 const { newProject, assign, validateProject } = await import('../src/projects/project');
 const { checkAttachmentCoverage } = await import('../src/weapons/coverage');
+const { extractPack } = await import('../src/projects/extractPack');
 const { WEAPON_PROFILES } = await import('../src/weapons/profiles');
 
 const pack = openPack(synthPack({ f01Max: 120 }));
@@ -84,4 +85,31 @@ test('kill sound: unmapped until the search test finds it, then built into every
   const s = out.groups[gis[0]].awc.streams.find((x) => x.id === f01.id)!;
   assert.equal(s.format.sampleRate, sr);
   assert.equal(s.format.samples, n);
+});
+
+test('kill sound from a soundpack: a known kill sound comes out labelled, an unknown one is in "Ganzes Pack zeigen"', () => {
+  const f01 = pack.groups[indexPack(pack).get('F01')![0]].awc.streams;
+  const loud = f01.find((s) => { const a = streamToAudio(s).channels[0]; let p = 0; for (let i = 0; i < a.length; i += 4) p = Math.max(p, Math.abs(a[i])); return p > 0.01; })!;
+  const mapping = { ...empty, entries: [{ file: 'F01', stream: loud.id, weapon: 'pistol' as const, slot: 'kill' }] };
+  const known = extractPack(pack, mapping).find((x) => x.slot === 'kill');
+  assert.ok(known, 'mapped kill sound is extracted');
+  assert.equal(known!.label, 'Kill-Sound (alle Waffen)');
+  assert.equal(known!.weapon, 'pistol');
+  // not mapped yet: the whole pack also shows the creator's own sounds of the big shared file F01
+  const plain = extractPack(pack, empty), all = extractPack(pack, empty, { all: true });
+  assert.ok(all.length > plain.length);
+  assert.ok(all.some((x) => x.key === `all:F01:${loud.id}`), 'the kill candidate in F01 can be picked');
+});
+test('one sound in many streams is stored once (shared data chunk) and reads back in every stream', () => {
+  const g = pack.groups[indexPack(pack).get('F01')![0]];
+  const sound = stereo(0.5, 44100);
+  const ids = g.awc.streams.slice(0, 10).map((s) => s.id);
+  const streams = g.awc.streams.map((s) => (ids.includes(s.id) ? replaceStreamAudio(s, sound, { normalize: false, sampleRate: 44100 }) : s));
+  const plain = writeAwc({ ...g.awc, streams }), shared = writeAwc({ ...g.awc, streams }, { share: true });
+  const one = streams.find((s) => s.id === ids[0])!.data.length;
+  assert.ok(plain.length - shared.length >= 9 * one, `saves 9 copies (${plain.length - shared.length} B)`);
+  const back = parseAwc(shared);
+  for (const id of ids) assert.deepEqual(back.streams.find((s) => s.id === id)!.data, streams.find((s) => s.id === id)!.data);
+  for (const s of back.streams) if (!ids.includes(s.id)) assert.deepEqual(s.data, g.awc.streams.find((x) => x.id === s.id)!.data, 'other streams untouched');
+  assert.deepEqual(writeAwc(parseAwc(plain)), plain, 'without share the layout stays byte-identical');
 });
