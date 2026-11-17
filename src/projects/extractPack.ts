@@ -11,6 +11,7 @@ import { WEAPON_PROFILES } from '../weapons/profiles';
 import { indexPack } from './build';
 import { TEST_GROUPS } from './gameTest';
 import { classifySound, soundFeatures } from '../dsp/classify';
+import { isOwnSound } from '../formats/reference';
 import { RELOAD_TEST_GROUPS } from './gameTest';
 
 export interface Extracted {
@@ -85,7 +86,8 @@ export function extractPack(pack: Pack, mapping: Mapping = loadMapping(), opts: 
     const audio = toAudio(list);
     if (!audio) continue;
     list.forEach((e) => used.add(`${e.file}:${e.stream}`));
-    out.push({ key: `${prof.id}:${slot.id}`, label: `${prof.displayName} · ${slot.label}`, weapon: prof.id as WeaponId, slot: slot.id, kind: /fire/.test(slot.id) ? 'shot' : 'mechanical', sure: true, audio, seconds: audio.channels[0].length / audio.sampleRate });
+    const label = slot.type === 'kill' ? `${slot.label} (alle Waffen)` : `${prof.displayName} · ${slot.label}`;
+    out.push({ key: `${prof.id}:${slot.id}`, label, weapon: prof.id as WeaponId, slot: slot.id, kind: /fire/.test(slot.id) ? 'shot' : 'mechanical', sure: true, audio, seconds: audio.channels[0].length / audio.sampleRate });
   }
   // 2 · pistol shots not named yet
   const letters = 'ABCDEFGH';
@@ -112,10 +114,12 @@ export function extractPack(pack: Pack, mapping: Mapping = loadMapping(), opts: 
   if (opts.all) {
     pack.groups.forEach((g, gi) => {
       const k = [...idx.entries()].find(([, l]) => l.includes(gi))?.[0] ?? `C${gi}`;
-      if (k === 'F01') return; // RESIDENT's big shared file: hundreds of original game sounds
       const inRes = !g.refs.some((r) => /WEAPONS_PLAYER/i.test(pack.archives[r.archive]?.name ?? ''));
       for (const st of g.awc.streams) {
         if (used.has(`${k}:${st.id}`)) continue;
+        // F01 (the big shared file) holds hundreds of original game sounds – only the creator's own ones are shown
+        // (e.g. an own kill sound)
+        if (k === 'F01' && !isOwnSound(k, st.id, st.data)) continue;
         let audio: AudioData; try { audio = streamToAudio(st); } catch { continue; }
         if (silent(audio)) continue;
         used.add(`${k}:${st.id}`);
