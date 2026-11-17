@@ -65,7 +65,7 @@ export function exportPack(pack: Pack, replacements: Map<number, Map<number, Awc
   for (const [gid, streams] of replacements) {
     if (!streams.size) continue;
     const g = pack.groups[gid];
-    const awc = fitContainer(writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }), g.length);
+    const awc = fitContainer(writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }, { share: true }), g.length);
     for (const r of g.refs) {
       out[r.archive].bytes = patchAwcInPlace(out[r.archive].bytes, r, awc); // copy-on-write: originals untouched
       out[r.archive].patchedContainers++;

@@ -100,12 +100,21 @@ export function parseAwc(bytes: Uint8Array): AwcFile {
   return { version, flags, streams };
 }
 
+const sameBytes = (a: Uint8Array, b: Uint8Array) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
 /**
  * Serialises an AWC using the exact layout found in the reference:
  * header | chunk-index table | stream infos | chunk infos | format chunks | peak chunks |
  * marker chunks | data chunks (each 16-byte aligned, zero padding).
+ * share: streams with byte-identical audio point at ONE data chunk (each chunk info carries its own offset). A
+ * container cannot grow inside the archive, so one sound written into many streams (a reload for all pistols)
+ * would otherwise not fit.
  */
-export function writeAwc(awc: AwcFile): Uint8Array {
+export function writeAwc(awc: AwcFile, opts: { share?: boolean } = {}): Uint8Array {
   const streams = [...awc.streams].sort((a, b) => a.id - b.id);
   const n = streams.length;
   const totalChunks = streams.reduce((s, x) => s + x.chunkOrder.length, 0);
@@ -115,7 +124,15 @@ export function writeAwc(awc: AwcFile): Uint8Array {
   streams.forEach((_s, i) => { offsets[i].set(CHUNK.format, p); p += 24; });
   streams.forEach((s, i) => { if (s.peak) { offsets[i].set(CHUNK.peak, p); p += s.peak.length; } });
   streams.forEach((s, i) => { if (s.markers) { offsets[i].set(CHUNK.markers, p); p += s.markers.length; } });
-  streams.forEach((s, i) => { p = align16(p); offsets[i].set(CHUNK.data, p); p += s.data.length; });
+  const firstWith = new Map<number, number[]>(); // data length → indexes of streams already laid out with it
+  streams.forEach((s, i) => {
+    if (opts.share && s.data.length) {
+      const same = (firstWith.get(s.data.length) ?? []).find((j) => sameBytes(streams[j].data, s.data));
+      if (same !== undefined) { offsets[i].set(CHUNK.data, offsets[same].get(CHUNK.data)!); return; }
+      firstWith.set(s.data.length, [...(firstWith.get(s.data.length) ?? []), i]);
+    }
+    p = align16(p); offsets[i].set(CHUNK.data, p); p += s.data.length;
+  });
   const total = p;
   if (total > 0x0fffffff) throw new AwcError('AWC würde das Container-Limit von 256 MB überschreiten.');
   const out = new Uint8Array(total);
