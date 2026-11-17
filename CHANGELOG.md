@@ -6,6 +6,11 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.14 – 17.11.2026
+- Behoben: „Passt nicht in die Vorlage … zusammen X s zu lang“ beim Nachladen. Der Reload steckt für alle drei Pistolen in 14 Stellen der großen gemeinsamen Spieldatei – SP Tool hat ihn 14-mal einzeln gespeichert, dafür war kein Platz. Jetzt wird ein gleicher Sound in einer Datei nur einmal gespeichert und alle Stellen zeigen darauf. Dadurch passt auch ein langer Reload (getestet bis 4 s)
+- Kill-Sound: Neuer Knopf „Aus einem Soundpack holen“ – SP reinziehen, Sounds anhören, beim richtigen „Nehmen“. Ist der Kill-Sound aus dem Suchtest bekannt, holt SP Tool ihn beim Reinziehen automatisch
+- „Ganzes Pack zeigen“ zeigt jetzt auch die selbst gemachten Sounds aus der großen gemeinsamen Spieldatei (dort liegt z. B. der Kill-Sound eines SPs) – die Original-GTA-Sounds darin bleiben ausgeblendet
+
 ## 1.10.13 – 16.11.2026
 - Soundpack erstellen: Jeder Abspiel-Knopf spielt deinen Sound jetzt so, wie er ins Spiel kommt – in Mono wie GTA, mit eigener Länge, Abtastrate und Lautstärke. Vorher lief in der Liste die Stereo-Datei, deshalb klang es im Spiel anders als im Creator
 - „Alles anhören“ beim Nachladen spielt die Teile ebenfalls so, wie sie ins Spiel kommen
