@@ -86,7 +86,9 @@ export function extractPack(pack: Pack, mapping: Mapping = loadMapping(), opts: 
     const audio = toAudio(list);
     if (!audio) continue;
     list.forEach((e) => used.add(`${e.file}:${e.stream}`));
-    const label = slot.type === 'kill' ? `${slot.label} (alle Waffen)` : `${prof.displayName} · ${slot.label}`;
+    // reload sounds are always taken as the whole reload – no "Magazin raus / rein" parts in the list
+    const reloadPart = /^(mag_out|mag_in|slide|reload_finish)$/.test(slot.id);
+    const label = slot.type === 'kill' ? `${slot.label} (alle Waffen)` : `${prof.displayName} · ${reloadPart ? 'Nachladen' : slot.label}`;
     out.push({ key: `${prof.id}:${slot.id}`, label, weapon: prof.id as WeaponId, slot: slot.id, kind: /fire/.test(slot.id) ? 'shot' : 'mechanical', sure: true, audio, seconds: audio.channels[0].length / audio.sampleRate });
   }
   // 2 · pistol shots not named yet
