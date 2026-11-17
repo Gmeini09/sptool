@@ -10,13 +10,12 @@ import { BasePicker, useBase } from '../components/BasePicker';
 import { Icon } from '../components/Icon';
 import { PackSoundsDialog } from '../components/PackSounds';
 import { Button, DoneMark, Progress } from '../components/ui';
-import type { AudioData } from '../dsp/types';
 import { classifySound } from '../dsp/classify';
 import { loadMapping, MAPPING_EVENT } from '../formats/mapping';
 import { allEntries, entryById } from '../library/assets';
-import { featuredFirst } from '../library/turbo';
+import { featuredFirst, WHOLE_RELOAD } from '../library/turbo';
 import { freeReloads } from '../library/freeReloads';
-import { AUDIO_ACCEPT, AUDIO_EXT, addAudioEntry, importAudioFiles, importSorted, importWholeReload, reloadPartsOf, type SortedFile } from '../library/importAudio';
+import { AUDIO_ACCEPT, AUDIO_EXT, addAudioEntry, addWholeReload, importAudioFiles, importSorted, importWholeReload, type SortedFile } from '../library/importAudio';
 import { reportDetection } from '../services/detectionFeedback';
 import type { LibraryEntry, Style, WeaponId } from '../models/types';
 import { renderAssignment } from '../projects/actions';
@@ -25,7 +24,7 @@ import { soundReport } from '../projects/report';
 import { SAME_SOUND, blockedLabels, inGameAudio, nothingChangesMessage, planBuild, runBuild, sameAsBase, sharedReload, SILENCE, type BuildPlan, type InGameSound, type PlanItem, type Transplant } from '../projects/build';
 import { SoundEditorOverlay } from './Editor';
 import { openPack, type Pack } from '../formats/pack';
-import { gameAudio, streamToAudio } from '../formats/awc';
+import { streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
@@ -36,8 +35,9 @@ import { logger } from '../services/logger';
 import { WEAPON_PROFILES } from '../weapons/profiles';
 
 const WEAPONS = WEAPON_PROFILES.map((p) => p.id as WeaponId); // pistol, pistol_mk2, pistol50
+// the game's reload slots: the whole reload goes into the first one (where the reload starts), the rest is muted
 const RELOAD_SLOTS = ['mag_out', 'mag_in', 'slide', 'reload_finish'] as const;
-const RELOAD_LABEL: Record<string, string> = { mag_out: 'Magazin raus', mag_in: 'Magazin rein', slide: 'Schlitten', reload_finish: 'Nachladen fertig' };
+const RELOAD_SLOT = RELOAD_SLOTS[0];
 const ORIGINAL = 'original';
 const label = (w: WeaponId) => WEAPON_PROFILES.find((p) => p.id === w)!.displayName;
 const STEPS = [...WEAPONS.map(label), 'Nachladen', 'Kill-Sound', 'Fertig'];
@@ -48,27 +48,10 @@ const KILL_WEAPON: WeaponId = 'pistol', KILL_SLOT = 'kill';
 /** Every play button here plays the sound the way the build writes it into the game file. */
 const hear = (e: LibraryEntry) => previewEntry(e, { inGame: true });
 
-type ReloadMode = 'whole' | 'single' | 'none';
-interface ReloadChoice { mode: ReloadMode; split: boolean; whole: Record<string, string> | null; single: Record<string, string | null>; weapons: WeaponId[] }
+/** The reload is ONE whole sound for the chosen pistols; id null = original. */
+interface ReloadChoice { id: string | null; weapons: WeaponId[] }
 
 const entriesFor = (lib: LibraryEntry[], w: WeaponId, slot: string) => lib.filter((e) => slotMatches(e, w, slot));
-
-/** Plays the reload parts one after another – each as it goes into the game (mono, 1 : 1). */
-async function playSequence(ids: string[]) {
-  const parts: AudioData[] = [];
-  for (const id of ids) if (id && id !== SILENCE) parts.push(gameAudio(await renderAssignment({ entryId: id })));
-  if (!parts.length) return;
-  const sr = parts[0].sampleRate, gap = Math.round(sr * 0.3);
-  const len = parts.reduce((n, p) => n + Math.round(p.channels[0].length * sr / p.sampleRate) + gap, 0);
-  const out = new Float32Array(len);
-  let pos = 0;
-  for (const p of parts) {
-    const ratio = p.sampleRate / sr, n = Math.round(p.channels[0].length / ratio), src = p.channels[0];
-    for (let i = 0; i < n; i++) out[pos + i] = src[Math.min(src.length - 1, Math.floor(i * ratio))];
-    pos += n + gap;
-  }
-  engine.play({ sampleRate: sr, channels: [out] }, { key: `seq:${ids.join(',')}` });
-}
 
 /** Drop zone + button for audio files (any format). */
 function AudioDrop({ title, hint, multiple, onFiles }: { title: string; hint: string; multiple?: boolean; onFiles: (f: File[]) => void }) {
@@ -105,7 +88,8 @@ export function CreateView() {
   const [step, setStep] = useState(0);
   const [style, setStyle] = useState<Style | 'all' | 'featured'>('all');
   const [fire, setFire] = useState<Record<string, string | null>>({});
-  const [reload, setReload] = useState<ReloadChoice>({ mode: 'whole', split: true, whole: null, single: {}, weapons: [...WEAPONS] });
+  const [reload, setReload] = useState<ReloadChoice>({ id: null, weapons: [...WEAPONS] });
+  const pickReload = (id: string | null) => setReload((r) => ({ ...r, id }));
   const [kill, setKill] = useState<string | null>(null); // null = original
   const [name, setName] = useState('Mein Soundpack');
   const [busy, setBusy] = useState<string | null>(null);
@@ -140,50 +124,26 @@ export function CreateView() {
 
   const cur: WeaponId | null = step < WEAPONS.length ? WEAPONS[step] : null;
   const pickFire = (w: WeaponId, id: string | null) => setFire((f) => ({ ...f, [w]: id }));
-  const lastReload = useRef<File | null>(null);
-  // switching between "in Teile" and "als Ganzes" reuses what was already imported (no duplicates in the library)
-  const reloadCache = useRef(new Map<string, Record<string, LibraryEntry>>());
-  const importReload = async (file: File, split: boolean) => {
-    setBusy(split ? 'Reload wird zerlegt…' : 'Reload wird übernommen…');
-    const ck = `${file.name}:${file.size}:${file.lastModified}:${split}`;
-    let whole = false;
-    const cached = reloadCache.current.get(ck);
-    const parts = cached ?? await importWholeReload(file, 'universal', split, { onWhole: () => { whole = true; } });
-    // nothing to cut (one continuous sound): it runs as one whole reload instead of a cut-off "Magazin rein"
-    if (split && !cached && whole) {
-      setBusy(null);
-      if (Object.keys(parts).length) reloadCache.current.set(`${file.name}:${file.size}:${file.lastModified}:false`, parts);
-      return importReload(file, false);
+  const importReload = async (file: File) => {
+    setBusy('Reload wird übernommen…');
+    const e = await importWholeReload(file);
+    if (e) {
+      const c = classifySound(await renderAssignment({ entryId: e.id }));
+      if (c.kind === 'shot' && c.sure) toast('warning', 'Klingt eher nach einem Schuss', 'Trotzdem als Nachladen übernommen – hör ihn dir an.');
+      pickReload(e.id);
+      void hear(e);
     }
-    if (Object.keys(parts).length) reloadCache.current.set(ck, parts);
-    const first = parts.mag_out ?? Object.values(parts)[0];
-    if (first) { const c = classifySound(await renderAssignment({ entryId: first.id })); if (c.kind === 'shot' && c.sure) toast('warning', 'Klingt eher nach einem Schuss', 'Trotzdem als Nachladen übernommen – prüf es mit „Alles anhören“.'); }
     setBusy(null);
-    const ids: Record<string, string> = Object.fromEntries(Object.entries(parts).map(([k, e]) => [k, e.id]));
-    // as ONE sound: the other reload parts are muted in the pack, which also frees room for the full length
-    if (!split && ids.mag_out) for (const k of ['mag_in', 'slide', 'reload_finish']) ids[k] = SILENCE;
-    if (!Object.keys(ids).length) return;
-    setReload((r) => ({ ...r, split, whole: ids }));
-    void playSequence(split ? RELOAD_SLOTS.map((k) => ids[k] ?? '') : [ids.mag_out]);
   };
 
-  const reloadIds = (): Record<string, string> => {
-    if (reload.mode === 'whole') return reload.whole ?? {};
-    if (reload.mode === 'single') return Object.fromEntries(Object.entries(reload.single).filter(([, v]) => v)) as Record<string, string>;
-    return {};
-  };
   const project = (): Project => {
     let p = newProject(name.trim() || 'Mein Soundpack', session?.displayName ?? '');
-    const rel = reloadIds();
     for (const w of WEAPONS) {
       const f = fire[w];
       if (f && f !== ORIGINAL) p = assign(p, w, 'fire', { entryId: f });
-      if (reload.weapons.includes(w)) for (const s of RELOAD_SLOTS) {
-        if (rel[s]) p = assign(p, w, s, { entryId: rel[s] });
-        // a whole reload as ONE sound plays at the start of the reload – the other reload parts are muted, so the
-        // game's own clicks do not sound on top of it (the way creator packs do it)
-        else if (reload.mode === 'whole' && !reload.split && rel.mag_out) p = assign(p, w, s, { entryId: SILENCE });
-      }
+      // the whole reload plays where the game starts the reload; the other reload slots are muted, so the game's own
+      // clicks do not sound on top of it (the way creator packs do it)
+      if (reload.id && reload.weapons.includes(w)) for (const s of RELOAD_SLOTS) p = assign(p, w, s, { entryId: s === RELOAD_SLOT ? reload.id : SILENCE });
     }
     if (kill) p = assign(p, KILL_WEAPON, KILL_SLOT, { entryId: kill });
     return p;
@@ -203,7 +163,7 @@ export function CreateView() {
   const [editRev, setEditRev] = useState(0); // a sound was edited (also in place): plan the preview anew
   const gameItem = (p: BuildPlan): PlanItem | undefined => cur
     ? p.items.find((i) => i.weapon === cur && i.slot === 'fire')
-    : step === RELOAD_STEP ? p.items.find((i) => RELOAD_SLOTS.includes(i.slot as typeof RELOAD_SLOTS[number]) && i.status === 'ready' && i.assignment.entryId !== SILENCE)
+    : step === RELOAD_STEP ? p.items.find((i) => i.slot === RELOAD_SLOT && i.status === 'ready')
     : step === KILL_STEP ? p.items.find((i) => i.weapon === KILL_WEAPON && i.slot === KILL_SLOT) : undefined;
   const gameKey = (i: PlanItem) => `ingame:${i.weapon}:${i.slot}:${i.assignment.entryId}`;
   useEffect(() => {
@@ -244,10 +204,7 @@ export function CreateView() {
   const editTarget = (): { id: string; put: (id: string) => void } | null => {
     if (cur) { const id = fire[cur]; const w = cur; return id && id !== ORIGINAL ? { id, put: (n) => pickFire(w, n) } : null; }
     if (step === KILL_STEP) return kill ? { id: kill, put: (n) => setKill(n) } : null;
-    const rel = reloadIds();
-    const k = RELOAD_SLOTS.find((s) => rel[s] && rel[s] !== SILENCE);
-    if (!k) return null;
-    return { id: rel[k], put: (n) => setReload((r) => (r.mode === 'single' ? { ...r, single: { ...r.single, [k]: n } } : { ...r, whole: { ...(r.whole ?? {}), [k]: n } })) };
+    return reload.id ? { id: reload.id, put: (n) => pickReload(n) } : null;
   };
   // "Original": the sound that sits in the template at that place now – to compare with yours
   // is there a template sound at this place at all? (no: weapon / part not mapped yet, or missing in the template)
@@ -346,9 +303,8 @@ export function CreateView() {
     setBusy(null);
     setRecog(r.files);
     if (r.shots[0]) { pickFire(cur, r.shots[0].id); void hear(r.shots[0]); }
-    const rel = Object.fromEntries(Object.entries(r.reload).map(([k, e]) => [k, e.id]));
-    if (Object.keys(rel).length) setReload((x) => ({ ...x, mode: 'single', single: { ...x.single, ...rel } }));
-    const parts = [r.shots.length ? `${r.shots.length} Schuss${r.shots.length > 1 ? '-Sounds' : ''}${r.shots[0] ? ` → ${label(cur)}` : ''}` : '', Object.keys(rel).length ? `${Object.keys(rel).length} Nachlade-Teil${Object.keys(rel).length > 1 ? 'e' : ''} (${Object.keys(rel).map((k) => RELOAD_LABEL[k]).join(', ')}) → Schritt „Nachladen“` : ''].filter(Boolean);
+    if (r.reload) pickReload(r.reload.id);
+    const parts = [r.shots.length ? `${r.shots.length} Schuss${r.shots.length > 1 ? '-Sounds' : ''}${r.shots[0] ? ` → ${label(cur)}` : ''}` : '', r.reload ? 'Reload → Schritt „Nachladen“' : ''].filter(Boolean);
     if (parts.length) toast('success', 'Erkannt und einsortiert', parts.join(' · '));
   };
   // drops anywhere on the page (see FILES_DROPPED): weapon step → import, reload step → whole reload
@@ -356,12 +312,7 @@ export function CreateView() {
     const audio = files.filter((f) => AUDIO_EXT.test(f.name) || f.type.startsWith('audio/'));
     if (!audio.length || busy) return false;
     if (cur) { void importForWeapon(audio); return true; }
-    if (step === RELOAD_STEP) {
-      lastReload.current = audio[0];
-      setReload((r) => ({ ...r, mode: 'whole' }));
-      void importReload(audio[0], reload.split);
-      return true;
-    }
+    if (step === RELOAD_STEP) { void importReload(audio[0]); return true; }
     if (step === KILL_STEP) {
       void importAudioFiles(audio.slice(0, 1), { weapon: 'universal', slot: KILL_SLOT }).then((es) => { if (es[0]) { setKill(es[0].id); void hear(es[0]); } });
       return true;
@@ -386,18 +337,13 @@ export function CreateView() {
     if (f.as === 'shot') {
       if (f.ids.includes(fire[cur] ?? '')) pickFire(cur, null);
       dropEntries(f.ids);
-      const taken = Object.keys(reload.single).filter((k) => reload.single[k]);
-      const got = await reloadPartsOf(f.audio, base, taken, `Importierte Datei ${f.name} (von dir als Nachladen markiert)`);
-      const ids = Object.fromEntries(Object.entries(got).map(([k, e]) => [k, e.id]));
-      setReload((x) => ({ ...x, mode: 'single', single: { ...x.single, ...ids } }));
-      setRecog((r) => r.map((x, j) => (j === i ? { ...x, as: 'reload', ids: Object.values(ids) } : x)));
+      const e = await addWholeReload(f.audio, base, `Importierte Datei ${f.name} (von dir als Nachladen markiert)`);
+      pickReload(e.id);
+      setRecog((r) => r.map((x, j) => (j === i ? { ...x, as: 'reload', ids: [e.id] } : x)));
       reportDetection(f.audio, 'reload', 'import');
-      toast('success', 'Geändert: Nachladen', `${Object.keys(ids).map((k) => RELOAD_LABEL[k]).join(', ')} → Schritt „Nachladen“`);
+      toast('success', 'Geändert: Nachladen', 'Reload → Schritt „Nachladen“');
     } else {
-      setReload((x) => {
-        const single = Object.fromEntries(Object.entries(x.single).filter(([, v]) => !f.ids.includes(v ?? '')));
-        return { ...x, single, mode: x.mode === 'single' && !Object.values(single).some(Boolean) ? 'whole' : x.mode };
-      });
+      if (reload.id && f.ids.includes(reload.id)) pickReload(null);
       dropEntries(f.ids);
       const e = await addAudioEntry(f.audio, base, { weapon: cur, slot: 'fire' }, `Importierte Datei ${f.name} (von dir als Schuss markiert)`);
       pickFire(cur, e.id);
@@ -413,7 +359,8 @@ export function CreateView() {
   const imported = (w: WeaponId) => entriesFor(lib, w, 'fire').filter((e) => e.source === 'imported' && !e.hidden);
   // own sounds of this step: imported and edited ("Turbo 37 bearbeitet"), newest first
   const ownFire = (w: WeaponId) => [...entriesFor(lib, w, 'fire').filter((e) => e.source === 'edit' && !e.hidden).sort((a, b) => b.createdAt - a.createdAt), ...imported(w)];
-  const editedReloads = () => lib.filter((e) => e.source === 'edit' && e.type === 'reload' && !e.hidden).sort((a, b) => b.createdAt - a.createdAt);
+  // own reloads (imported, from a soundpack, edited) – newest first
+  const ownReloads = () => lib.filter((e) => (e.source === 'imported' || e.source === 'edit') && e.type === 'reload' && (e.component === 'Magazine Out' || e.component === WHOLE_RELOAD) && !e.hidden).sort((a, b) => b.createdAt - a.createdAt);
   // clears the whole import list of this weapon; whatever pointed at one goes back to "nothing chosen".
   // A sound a saved soundpack still uses only leaves the list (deleting it would break that pack), the rest is deleted.
   const clearImported = (w: WeaponId) => {
@@ -429,7 +376,7 @@ export function CreateView() {
     setConfirmClear(false);
     toast('info', `${all.length} importierte${all.length > 1 ? ' Sounds' : 'r Sound'} gelöscht`, `Schuss für die ${label(w)}`);
   };
-  const nameOf = (id: string | null | undefined) => id === SILENCE ? 'stumm (steckt im ganzen Reload)' : (id ? lib.find((e) => e.id === id)?.name : null) ?? '–';
+  const nameOf = (id: string | null | undefined) => (id ? lib.find((e) => e.id === id)?.name : null) ?? '–';
 
   if (done) {
     const kept = blockedLabels(done.plan);
@@ -583,77 +530,27 @@ export function CreateView() {
             </div>
           )}
           {!rest && <p className="small muted" style={{ marginTop: 0 }}>Tipp: Den Reload eines fertigen SP nimmst du am einfachsten mit „Aus einem Soundpack holen“ → <b>Reload & Rest übernehmen</b>.</p>}
-          <div className="seg" style={{ marginBottom: 12 }}>
-            <button className={reload.mode === 'whole' ? 'on' : ''} onClick={() => setReload((r) => ({ ...r, mode: 'whole' }))}>Ganzer Reload-Sound</button>
-            <button className={reload.mode === 'single' ? 'on' : ''} onClick={() => setReload((r) => ({ ...r, mode: 'single' }))}>Einzelne Teile</button>
-            <button className={reload.mode === 'none' ? 'on' : ''} onClick={() => setReload((r) => ({ ...r, mode: 'none' }))}>Original lassen</button>
+          <div className="create-sources">
+            <AudioDrop title="Reload-Sound importieren" hint="Eine Datei mit dem kompletten Nachladen – sie läuft als EIN Sound, sobald nachgeladen wird." onFiles={(files) => { if (files[0]) void importReload(files[0]); }} />
+            <button className="create-source" onClick={() => setPackOpen(true)}>
+              <Icon name="box" size={22} />
+              <div><b>Aus einem Soundpack holen</b><div className="small muted">SP reinziehen, Reload anhören und übernehmen.</div></div>
+            </button>
+          </div>
+          <div className="create-list">
+            <div className={`create-item original${!reload.id ? ' sel' : ''}`} onClick={() => { engine.stop(); pickReload(null); }}>
+              <span className="play-btn ghost"><Icon name="undo" size={12} /></span>
+              <span className="grow"><b>Original behalten</b> <span className="faint small">– im Spiel bleibt der Reload der Vorlage</span></span>
+              {!reload.id && <span className="chip ok"><Icon name="check" size={12} />gewählt</span>}
+            </div>
+            {ownReloads().map((e) => <SoundRow key={e.id} e={e} sel={reload.id === e.id} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : 'importiert'} onPick={() => { pickReload(e.id); void hear(e); }} />)}
+          </div>
+          <div className="qp-label" style={{ marginTop: 14 }}>Oder ein freier Reload-Sound (CC0, aus dem Internet)</div>
+          <div className="create-list compact">
+            {freeReloads().map((e) => <SoundRow key={e.id} e={e} sel={reload.id === e.id} playing={playing} extra={`von ${e.creator}`} onPick={() => { pickReload(e.id); void hear(e); }} />)}
           </div>
 
-          {reload.mode === 'whole' && <>
-            <div className="seg" style={{ marginBottom: 10 }} role="radiogroup" aria-label="Reload-Sound">
-              <button role="radio" aria-checked={reload.split} className={reload.split ? 'on' : ''} onClick={() => { setReload((r) => ({ ...r, split: true })); if (lastReload.current && !reload.split) void importReload(lastReload.current, true); }}>In Teile schneiden</button>
-              <button role="radio" aria-checked={!reload.split} className={!reload.split ? 'on' : ''} onClick={() => { setReload((r) => ({ ...r, split: false })); if (lastReload.current && reload.split) void importReload(lastReload.current, false); }}>Als Ganzes einfügen</button>
-            </div>
-            <div className="create-sources">
-              <AudioDrop title="Ganzen Reload-Sound importieren" hint={reload.split ? 'Eine Datei mit dem kompletten Nachladen – SP Tool schneidet sie in Magazin raus, Magazin rein, Schlitten und Fertig.' : 'Eine Datei mit dem kompletten Nachladen – sie läuft als EIN Sound, sobald nachgeladen wird.'} onFiles={async (files) => {
-                if (!files[0]) return;
-                lastReload.current = files[0];
-                await importReload(files[0], reload.split);
-              }} />
-              <button className="create-source" onClick={() => setPackOpen(true)}>
-                <Icon name="box" size={22} />
-                <div><b>Aus einem Soundpack holen</b><div className="small muted">Nachlade-Sounds eines Packs anhören und übernehmen.</div></div>
-              </button>
-            </div>
-            {reload.whole && !reload.split && (
-              <div className="create-parts">
-                <div className="create-part grow"><span className="small muted">Ganzer Reload (ein Sound)</span><span>{nameOf(reload.whole.mag_out)}</span></div>
-                <Button size="sm" variant="ghost" icon="play" onClick={() => { const e = lib.find((x) => x.id === reload.whole?.mag_out); if (e) void hear(e); }}>Anhören</Button>
-              </div>
-            )}
-            {reload.whole && reload.split && (
-              <div className="create-parts">
-                {RELOAD_SLOTS.map((s) => (
-                  <div key={s} className="create-part">
-                    <span className="small muted">{RELOAD_LABEL[s]}</span>
-                    {reload.whole![s] ? <button className="link-like small" onClick={() => { const e = lib.find((x) => x.id === reload.whole![s]); if (e) void hear(e); }}><Icon name="play" size={11} /> {nameOf(reload.whole![s])}</button> : <span className="faint small">– (Original)</span>}
-                  </div>
-                ))}
-                <Button size="sm" variant="ghost" icon="play" onClick={() => void playSequence(RELOAD_SLOTS.map((k) => reload.whole?.[k] ?? ''))}>Alles anhören</Button>
-              </div>
-            )}
-            <div className="qp-label" style={{ marginTop: 14 }}>Oder ein freier Reload-Sound (CC0, aus dem Internet)</div>
-            <div className="create-list compact">
-              {[...editedReloads(), ...freeReloads()].map((e) => {
-                const sel = !reload.split && reload.whole?.mag_out === e.id;
-                return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'edit' ? 'bearbeitet' : `von ${e.creator}`} onPick={() => { setReload((r) => ({ ...r, split: false, whole: { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE } })); void hear(e); }} />;
-              })}
-            </div>
-          </>}
-
-          {reload.mode === 'single' && (
-            <button className="create-source" style={{ width: '100%', marginBottom: 6 }} onClick={() => setPackOpen(true)}>
-              <Icon name="box" size={22} />
-              <div><b>Aus einem Soundpack holen</b><div className="small muted">Mechanik-Sounds eines Packs anhören und als einzelne Teile übernehmen.</div></div>
-            </button>
-          )}
-          {reload.mode === 'single' && RELOAD_SLOTS.map((slot) => (
-            <div key={slot} className="create-slot">
-              <div className="row" style={{ gap: 8 }}><b className="grow">{RELOAD_LABEL[slot]}</b><span className="small muted">{reload.single[slot] ? nameOf(reload.single[slot]) : 'Original'}</span></div>
-              <AudioDrop title={`${RELOAD_LABEL[slot]} importieren`} hint="Audiodatei reinziehen oder klicken." onFiles={async (files) => {
-                const es = await importAudioFiles(files.slice(0, 1), { weapon: 'universal', slot });
-                if (es[0]) { setReload((r) => ({ ...r, single: { ...r.single, [slot]: es[0].id } })); void hear(es[0]); }
-              }} />
-              <div className="create-list compact">
-                {entriesFor(lib, 'pistol', slot).filter((e) => e.source !== 'builtin').map((e) => {
-                  const sel = reload.single[slot] === e.id;
-                  return <SoundRow key={e.id} e={e} sel={sel} playing={playing} extra={e.source === 'imported' ? 'importiert' : undefined} onPick={() => { setReload((r) => ({ ...r, single: { ...r.single, [slot]: sel ? null : e.id } })); if (!sel) void hear(e); }} />;
-                })}
-              </div>
-            </div>
-          ))}
-
-          {reload.mode !== 'none' && <>
+          {reload.id && <>
             <div className="qp-label" style={{ marginTop: 14 }}>Für welche Waffen?</div>
             <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
               {WEAPONS.map((w) => (
@@ -662,10 +559,10 @@ export function CreateView() {
                 </label>
               ))}
             </div>
-            {Object.keys(reloadIds()).length > 0 && plan.items.some((i) => RELOAD_SLOTS.includes(i.slot as typeof RELOAD_SLOTS[number]) && i.assignment.entryId !== SILENCE && !ok(i)) && (
-              <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div className="grow">{reload.mode === 'whole' && reload.split && <><b>Im Spiel wirkt davon bisher nur „Magazin raus“</b> – für die anderen Teile bleibt der GTA-Sound. Mit „Als Ganzes einfügen“ kommt der ganze Reload rein. </>}Wird mit gespeichert, wirkt im Spiel aber erst, wenn SP Tool weiß, wo GTA die Nachlade-Sounds ablegt. Das findest du mit dem <b>Test im Spiel</b> in ein paar Minuten heraus (einmal nachladen und die tiefen Pieptöne anklicken) – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>
+            {plan.items.some((i) => i.slot === RELOAD_SLOT && !ok(i)) && (
+              <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div className="grow">Wird mit gespeichert, wirkt im Spiel aber erst, wenn SP Tool weiß, wo GTA den Reload ablegt. Das findest du mit dem <b>Test im Spiel</b> heraus (einmal nachladen und die Pieptöne anklicken) – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>
             )}
-            {Object.values(reloadIds()).some((v) => v && v !== SILENCE) && inGameHint}
+            {inGameHint}
           </>}
         </div></div>
       )}
@@ -717,14 +614,14 @@ export function CreateView() {
               <div key={w} className="cs-weapon">
                 <b>{label(w)}</b>
                 {fire[w] === ORIGINAL && <div className="cs-row muted"><Icon name="undo" size={13} /><span className="grow">Schuss: {rest ? `wie in „${rest.label}“` : 'Original'}</span></div>}
-                {plan.items.filter((i) => i.weapon === w && i.slot !== KILL_SLOT && !(i.assignment.entryId === SILENCE && !ok(i))).map((i) => (
+                {plan.items.filter((i) => i.weapon === w && i.slot !== KILL_SLOT && i.assignment.entryId !== SILENCE).map((i) => (
                   <div key={i.slot} className={`cs-row ${ok(i) ? '' : 'muted'}`}>
                     <Icon name={ok(i) ? 'check' : 'lock'} size={13} />
-                    <span className="grow">{i.slotLabel}: {nameOf(i.assignment.entryId)}</span>
+                    <span className="grow">{i.slot === RELOAD_SLOT ? 'Nachladen' : i.slotLabel}: {nameOf(i.assignment.entryId)}</span>
                     {!ok(i) && <span className="faint small">noch ohne Wirkung</span>}
                   </div>
                 ))}
-                {(reload.mode === 'none' || !reload.weapons.includes(w)) && <div className="cs-row muted"><Icon name="undo" size={13} /><span className="grow">Nachladen: Original</span></div>}
+                {(!reload.id || !reload.weapons.includes(w)) && <div className="cs-row muted"><Icon name="undo" size={13} /><span className="grow">Nachladen: Original</span></div>}
               </div>
             ))}
           </div>
@@ -760,23 +657,11 @@ export function CreateView() {
           : <Button variant="primary" size="lg" icon="hammer" disabled={!!busy || (!plan.items.length && !rest) || (!!rest && !!nothingChangesMessage(plan, rest.label))} onClick={() => void create()}>{busy ? 'Wird erstellt…' : 'Soundpack erstellen'}</Button>}
       </div>
 
-      <PackSoundsDialog open={packOpen} onClose={() => setPackOpen(false)} onTakeRest={(t) => setRest(t)} hasReload={Object.keys(reloadIds()).length > 0} context={cur ? { weapon: cur, slot: 'fire' } : step === RELOAD_STEP ? { weapon: 'pistol', slot: 'reload' } : step === KILL_STEP ? { weapon: KILL_WEAPON, slot: KILL_SLOT } : undefined}
+      <PackSoundsDialog open={packOpen} onClose={() => setPackOpen(false)} onTakeRest={(t) => setRest(t)} hasReload={!!reload.id} context={cur ? { weapon: cur, slot: 'fire' } : step === RELOAD_STEP ? { weapon: 'pistol', slot: 'reload' } : step === KILL_STEP ? { weapon: KILL_WEAPON, slot: KILL_SLOT } : undefined}
         onUse={(t, e) => {
           if (t.slot === KILL_SLOT) { setKill(e.id); return; }
           if (t.slot === 'fire' && t.weapon !== 'reload') { pickFire(t.weapon, e.id); return; }
-          if (t.slot === 'whole') {
-            // the whole reload as ONE sound (starts with the reload); the other parts are made silent
-            void (async () => {
-              // muted parts shrink to a few milliseconds in the pack, so the whole reload keeps its full length
-              const ids: Record<string, string> = { mag_out: e.id, mag_in: SILENCE, slide: SILENCE, reload_finish: SILENCE };
-              setReload((r) => ({ ...r, mode: 'whole', split: false, whole: ids }));
-            })();
-            return;
-          }
-          // a part from a pack: into the cut-up whole reload if that is what is shown, otherwise into the single parts
-          setReload((r) => r.mode === 'whole' && r.split
-            ? { ...r, whole: { ...(r.whole ?? {}), [t.slot]: e.id } }
-            : { ...r, mode: 'single', single: { ...r.single, [t.slot]: e.id } });
+          if (t.weapon === 'reload') pickReload(e.id); // always the whole reload as one sound
         }} />
     </div>
   );
