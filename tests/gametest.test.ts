@@ -41,7 +41,8 @@ test('answers become mapping entries; same beeps for two weapons → first keeps
   const r = applyGameTest(m, { 'pistol:fire': 3, 'pistol_mk2:fire': 1, 'pistol50:fire': 1 });
   assert.equal(r.added, TEST_GROUPS[0].streams.length + TEST_GROUPS[2].streams.length);
   assert.equal(streamsFor(r.mapping, 'pistol_mk2', 'fire').length, 2);
-  assert.equal(streamsFor(r.mapping, 'pistol50', 'fire').length, 2, 'the shipped .50 shot stays');
+  // candidate A is the .50's own file (ptl_50cal + its copy) – here the MK2 answered the same beeps first and keeps it
+  assert.equal(streamsFor(r.mapping, 'pistol50', 'fire').length, 0, 'same beeps: the first weapon (MK2) keeps candidate A');
   assert.deepEqual(r.shared, [{ key: 'pistol50:fire', with: 'pistol_mk2:fire' }]);
   assert.equal(streamsFor(r.mapping, 'pistol', 'fire').length, 2);
 });

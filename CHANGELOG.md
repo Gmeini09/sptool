@@ -6,6 +6,12 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.17 – 17.11.2026
+- Soundpacks werden jetzt genau so gebaut wie von Hand mit OpenIV: Ein Sound, der nicht in den alten Platz passt, kommt ans Ende von WEAPONS_PLAYER.rpf bzw. RESIDENT.rpf, und das Inhaltsverzeichnis wird wieder mit Rockstars NG-Verschlüsselung gespeichert – wie bei allen Soundpacks aus der Community. Alle anderen Dateien bleiben an ihrer Stelle und Byte für Byte original
+- Die Schlüssel dafür holt SP Tool einmal auf deinem PC: aus deiner GTA5.exe und aus CodeWalkers magic.dat (von GitHub, fest auf eine Version geprüft). Sie bleiben auf deinem PC, SP Tool liefert keine Schlüssel mit
+- Behoben: Der Schuss der Pistol .50 landete in der Datei der Combat Pistol (ptl_combat). Er kommt jetzt in ptl_50cal.awc und dessen Kopie in weapons.awc – dort, wo ihn auch ein Ersteller von Hand ersetzt. Die alte, falsche Zuordnung wird auch aus älteren Zuordnungen vom Server ignoriert
+- Soundpacks aus der Community lassen sich mit den Schlüsseln vollständig lesen (Inhaltsverzeichnis entschlüsselt) – dann passen auch dort lange Sounds
+
 ## 1.10.16 – 17.11.2026
 - Kein „Passt nicht in die Vorlage … zu lang“ mehr mit dem Original-GTA-Soundpack als Vorlage: Ist ein Schuss oder Reload länger als der Platz in der Spieldatei, baut SP Tool WEAPONS_PLAYER.rpf bzw. RESIDENT.rpf komplett neu auf (offenes Inhaltsverzeichnis wie bei OpenIV). Dein Sound kommt in voller Länge ins Spiel – getestet mit 3 s Schuss und 4 s Reload
 - Alle anderen Dateien im Archiv bleiben Byte für Byte Rockstars Original; passt alles in den vorhandenen Platz, ändert sich gegenüber vorher nichts (das Inhaltsverzeichnis bleibt dann unverändert)

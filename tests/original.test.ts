@@ -56,9 +56,14 @@ test('original pack as template: every sound file opens, the pistol shot is writ
   assert.ok(changed.length > 0 && changed.every((o) => o >= 959488 && o < 959488 + 64512), `only ptl_pistol.awc changed (${changed.length} blocks)`);
 });
 
-test('original pack as template: a 3 s shot and a 4 s whole reload go in 1 : 1 – archives rebuilt, every other file is Rockstar\'s', { skip }, async () => {
+const magicPath = process.env.SPTOOL_MAGIC ?? '';
+const skipNg = skip || (!existsSync(magicPath) && 'needs CodeWalker magic.dat (SPTOOL_MAGIC)');
+
+test('original pack as template: a 3 s shot and a 4 s whole reload go in 1 : 1 – like OpenIV: appended, NG table of contents, every other file Rockstar\'s', { skip: skipNg }, async () => {
   const { SILENCE } = await import('../src/projects/build');
-  const { readPlainToc, readRpfHeader, knownToc } = await import('../src/formats/rpf');
+  const { readNgToc, readRpfHeader, knownToc } = await import('../src/formats/rpf');
+  const { findAesKey, unlockMagic, parseNgPayload, setNgKeys } = await import('../src/formats/ngCrypto');
+  setNgKeys(parseNgPayload(await unlockMagic(new Uint8Array(readFileSync(magicPath)), findAesKey(new Uint8Array(readFileSync(exe)))!)));
   const f = files();
   const pack = openPack(f);
   let p = assign(newProject('Lang', ''), 'pistol', 'fire', { entryId: 'shot' });
@@ -70,17 +75,22 @@ test('original pack as template: a 3 s shot and a 4 s whole reload go in 1 : 1 �
   const r = await runBuild(plan, pack, async (a) => (a.entryId === 'shot' ? shot : reload), undefined, { allArchives: true });
   for (const o of r.outputs) {
     const src = f.find((s) => s.name === o.name)!;
-    assert.equal(readRpfHeader(o.bytes).encryption, 'open', `${o.name}: rebuilt with a plain table of contents`);
-    const before = knownToc(src.bytes)!, after = readPlainToc(o.bytes)!;
+    assert.equal(readRpfHeader(o.bytes).encryption, 'ng', `${o.name}: table of contents NG-encrypted like OpenIV`);
+    assert.ok(o.bytes.length > src.bytes.length, `${o.name}: grew`);
+    assert.deepEqual(o.bytes.subarray(16 + readRpfHeader(o.bytes).entryCount * 16 + readRpfHeader(o.bytes).namesLength, src.bytes.length), src.bytes.subarray(16 + readRpfHeader(src.bytes).entryCount * 16 + readRpfHeader(src.bytes).namesLength), `${o.name}: everything after the table of contents stays (new data only appended)`);
+    const before = knownToc(src.bytes)!, after = readNgToc(o.bytes, o.name)!.files;
     assert.deepEqual(after.map((x) => x.name), before.map((x) => x.name), `${o.name}: same files`);
     let same = 0;
     for (const b of before) {
       const a = after.find((x) => x.name === b.name)!;
-      const eq = a.length === b.length && Buffer.compare(Buffer.from(o.bytes.subarray(a.offset, a.offset + a.length)), Buffer.from(src.bytes.subarray(b.offset, b.offset + b.length))) === 0;
+      const eq = a.offset === b.offset && a.length === b.length;
       if (eq) same++;
-      else assert.ok(['ptl_pistol.awc', 'weapons.awc'].includes(b.name), `${o.name}: only the pistol files change, not ${b.name}`);
+      else {
+        assert.ok(['ptl_pistol.awc', 'weapons.awc'].includes(b.name), `${o.name}: only the pistol files change, not ${b.name}`);
+        assert.ok(a.offset >= src.bytes.length, `${b.name} appended at the end`);
+      }
     }
-    assert.equal(same, before.length - 1, `${o.name}: every other file byte for byte Rockstar's`);
+    assert.equal(same, before.length - 1, `${o.name}: every other file at its old place, byte for byte Rockstar's`);
   }
   // opens again (plain replaced files + Rockstar's encrypted ones) and holds both sounds whole
   const out = openPack(r.outputs);

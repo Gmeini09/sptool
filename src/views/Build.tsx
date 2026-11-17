@@ -10,6 +10,7 @@ import { BasePicker, useBase } from '../components/BasePicker';
 import { renderAssignment } from '../projects/actions';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { logger } from '../services/logger';
+import { ensureNgKeys } from '../services/ngKeys';
 import { WEAPON_PROFILES } from '../weapons/profiles';
 import { openGameTest } from './GameTest';
 import { useCan } from '../account/perms';
@@ -44,6 +45,7 @@ export function BuildView() {
     if (!plan || !base) return;
     setBusy('Sounds werden berechnet…'); setProg(0); setResult(null);
     try {
+      await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
       const r = await runBuild(plan, base.pack, renderAssignment, (d, t, label) => { setBusy(d < t ? `Sound ${d + 1}/${t} wird berechnet · ${label}` : 'Archive werden geschrieben…'); setProg(d < t ? d / t : null); }, { allArchives: true });
       setResult(r);
       logger.info(`Build ${project.name}: ${r.replacedStreams} streams → ${r.outputs.map((o) => o.name).join(', ')}`);

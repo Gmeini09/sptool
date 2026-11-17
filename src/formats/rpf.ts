@@ -11,11 +11,13 @@
 // The original game archives (encrypted table of contents and encrypted AWC files) are
 // read through gtaOriginal.ts: known file positions + the AWC key from the user's GTA5.exe.
 //
-// Rebuilding (writeRpfOpen): when the file list of an archive is known – Rockstar's originals (gtaOriginal.ts) or an
-// archive with a readable table of contents (OPEN, as written by OpenIV, CodeWalker and SP Tool) – the whole archive
-// can be written anew with a plain table of contents. Then a container may grow: no "zu lang" for the template.
+// Containers that grow are written the way OpenIV does it when a creator replaces a file by hand (appendRpfNg):
+// the new file is appended at the end of the archive, the table of contents points to it, and the table of contents
+// is encrypted again with Rockstar's NG cipher (ngCrypto.ts). Every other byte of the archive stays as it was.
+// Archives with a plain table of contents (OPEN) are rebuilt with writeRpfOpen.
 import { AwcError, parseAwc, type AwcFile } from './awc';
 import { containersFromToc, originalArchive, originalContainers } from './gtaOriginal';
+import { activeNgKeys, ngDecrypt, ngEncrypt, ngKeyFor } from './ngCrypto';
 
 export const RPF7_MAGIC = 0x52504637; // "7FPR" on disk
 /** Encryption id of a plain table of contents ("OPEN", OpenIV style). */
@@ -83,12 +85,12 @@ export function awcLength(bytes: Uint8Array, offset: number): number {
  * Finds AWC containers stored unencrypted. RPF file data is 512-byte aligned, so only block
  * starts are checked – this avoids false hits inside audio data.
  */
-export function findAwcs(bytes: Uint8Array): FoundAwc[] {
+export function findAwcs(bytes: Uint8Array, name?: string): FoundAwc[] {
   const h = readRpfHeader(bytes);
   const original = originalContainers(bytes);
   if (original) return original;
-  // an archive SP Tool (or OpenIV/CodeWalker) wrote with a plain table of contents: every file is listed there
-  const toc = readPlainToc(bytes);
+  // a table of contents SP Tool can read (plain, or NG with the keys loaded): every file is listed there
+  const toc = readPlainToc(bytes) ?? (name ? readNgToc(bytes, name)?.files ?? null : null);
   if (toc) return containersFromToc(bytes, toc);
   const out: FoundAwc[] = [];
   const start = Math.ceil(h.tocEnd / 512) * 512;
@@ -143,6 +145,14 @@ export function readPlainToc(bytes: Uint8Array): TocFile[] | null {
   let h: RpfHeader;
   try { h = readRpfHeader(bytes); } catch { return null; }
   if (h.encryption !== 'open' && h.encryption !== 'none') return null;
+  return parseToc(bytes, h, bytes.byteLength);
+}
+
+/**
+ * Parses a table of contents that is plain in `bytes` (at least header + table; the header's encryption field is not
+ * looked at). total: size of the whole archive, to check that every file lies inside it.
+ */
+function parseToc(bytes: Uint8Array, h: RpfHeader, total: number): TocFile[] | null {
   if (h.entryCount < 1 || h.tocEnd > bytes.byteLength) return null;
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const namesAt = 16 + h.entryCount * 16;
@@ -169,7 +179,7 @@ export function readPlainToc(bytes: Uint8Array): TocFile[] | null {
       const size = v.getUint32(p + 8, true), enc = v.getUint32(p + 12, true);
       if (packed !== 0 || enc !== 0) return false;
       const offset = blocks * BLOCK;
-      if (offset + size > bytes.byteLength) return false;
+      if (offset + size > total) return false;
       out.push({ name: prefix + nameOf(v.getUint16(p, true)), offset, length: size });
     }
     return true;
@@ -182,10 +192,94 @@ export function readPlainToc(bytes: Uint8Array): TocFile[] | null {
  * in-place patch) or one with a plain table of contents. null: unknown layout (a creator pack with an encrypted table
  * of contents) – such an archive can only be patched in place.
  */
-export function knownToc(bytes: Uint8Array): TocFile[] | null {
+export function knownToc(bytes: Uint8Array, name?: string): TocFile[] | null {
   const a = originalArchive(bytes);
-  if (a) return a.files.map(([name, offset, length]) => ({ name, offset, length }));
-  return readPlainToc(bytes);
+  if (a) return a.files.map(([n, offset, length]) => ({ name: n, offset, length }));
+  return readPlainToc(bytes) ?? (name ? readNgToc(bytes, name)?.files ?? null : null);
+}
+
+// ── NG table of contents (OpenIV / Rockstar) ─────────────────────────────────────────────────────────────────────
+
+/** Names an NG key may be derived from: the file's own name, then the game name it is installed as. */
+function ngNames(name: string): string[] {
+  const base = name.split(/[\\/]/).pop() ?? name;
+  const n = base.toLowerCase();
+  const game = /weapons_?player/.test(n) ? 'WEAPONS_PLAYER.rpf' : /(^|[^a-z])resident([^a-z]|$)/.test(n) ? 'RESIDENT.rpf' : null;
+  return [...new Set([base, game].filter((x): x is string => !!x))];
+}
+
+export interface NgToc { files: TocFile[]; name: string; entries: Uint8Array; names: Uint8Array }
+
+/**
+ * Decrypts the NG table of contents (needs the keys – ngKeys service). The key depends on the archive's file name and
+ * size; the name it was saved under is tried first, then the game name. null when it cannot be read.
+ */
+export function readNgToc(bytes: Uint8Array, name: string): NgToc | null {
+  const k = activeNgKeys();
+  if (!k) return null;
+  let h: RpfHeader;
+  try { h = readRpfHeader(bytes); } catch { return null; }
+  if (h.encryption !== 'ng' || h.tocEnd > bytes.byteLength) return null;
+  const eEnd = 16 + h.entryCount * 16;
+  for (const n of ngNames(name)) {
+    const key = ngKeyFor(k, n, bytes.byteLength);
+    const entries = ngDecrypt(k, key, bytes.subarray(16, eEnd)), names = ngDecrypt(k, key, bytes.subarray(eEnd, h.tocEnd));
+    const plain = new Uint8Array(h.tocEnd);
+    plain.set(bytes.subarray(0, 16)); plain.set(entries, 16); plain.set(names, eEnd);
+    const files = parseToc(plain, h, bytes.byteLength);
+    if (files && files.length && files.every((f) => /^[\x20-\x7e]+$/.test(f.name))) return { files, name: n, entries, names };
+  }
+  return null;
+}
+
+/**
+ * Replaces files the way OpenIV does when a creator swaps them by hand: every new file is appended at the end of the
+ * archive (512-byte aligned), its entry points there, and the table of contents is encrypted again with NG (the key
+ * depends on the new archive size). Unchanged files keep their place and bytes. replacements: old file offset → data.
+ */
+export function appendRpfNg(bytes: Uint8Array, name: string, replacements: Map<number, Uint8Array>): Uint8Array {
+  const k = activeNgKeys();
+  if (!k) throw new NeedNgKeysError();
+  const toc = readNgToc(bytes, name);
+  if (!toc) throw new RpfError(`${name}: Das Inhaltsverzeichnis ließ sich nicht entschlüsseln.`);
+  const h = readRpfHeader(bytes);
+  const entries = new Uint8Array(toc.entries);
+  const ev = new DataView(entries.buffer);
+  let size = Math.ceil(bytes.byteLength / BLOCK) * BLOCK;
+  const placed: Array<{ at: number; data: Uint8Array }> = [];
+  const done = new Set<number>();
+  for (let i = 0; i < h.entryCount; i++) {
+    const e = i * 16, x = ev.getUint32(e + 4, true);
+    if (x === DIR_MARK || x & 0x80000000) continue;
+    const off = (entries[e + 5] | (entries[e + 6] << 8) | (entries[e + 7] << 16)) * BLOCK;
+    const data = replacements.get(off);
+    if (!data) continue;
+    const blocks = size / BLOCK;
+    if (blocks > 0xffffff) throw new RpfError('Das Archiv würde größer als 8 GB.');
+    entries[e + 2] = 0; entries[e + 3] = 0; entries[e + 4] = 0; // stored as is
+    entries[e + 5] = blocks & 0xff; entries[e + 6] = (blocks >>> 8) & 0xff; entries[e + 7] = (blocks >>> 16) & 0xff;
+    ev.setUint32(e + 8, data.length, true);
+    ev.setUint32(e + 12, 0, true);
+    placed.push({ at: size, data });
+    size += Math.ceil(Math.max(1, data.length) / BLOCK) * BLOCK;
+    done.add(off);
+  }
+  for (const off of replacements.keys()) if (!done.has(off)) throw new RpfError(`${name}: Datei bei ${off} steht nicht im Inhaltsverzeichnis.`);
+  const out = new Uint8Array(size);
+  out.set(bytes);
+  for (const p of placed) out.set(p.data, p.at);
+  const key = ngKeyFor(k, toc.name, size);
+  const eEnd = 16 + h.entryCount * 16;
+  out.set(ngEncrypt(k, key, entries), 16);
+  out.set(ngEncrypt(k, key, toc.names), eEnd);
+  return out;
+}
+
+export class NeedNgKeysError extends Error {
+  constructor() {
+    super('Für lange Sounds braucht SP Tool einmal die Schlüssel zum Speichern der GTA-Archive (wie OpenIV): aus deiner GTA5.exe und CodeWalkers magic.dat. Starte SP Tool mit Internet und GTA V auf dem PC (oder zieh die GTA5.exe rein).');
+    this.name = 'NeedNgKeysError';
+  }
 }
 
 const ordinal = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

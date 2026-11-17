@@ -51,7 +51,7 @@ function openArchives(seconds = 0.3) {
   const f01 = catalogAwc('F01', { seconds: 0.05 });
   return [
     { name: 'WEAPONS_PLAYER.rpf', bytes: writeRpfOpen([
-      { name: 'ptl_50cal.awc', data: catalogAwc('F04', { seconds }) },
+      { name: 'ptl_50cal.awc', data: catalogAwc('F02', { seconds }) },
       { name: 'ptl_pistol.awc', data: catalogAwc('F03', { seconds }) },
       { name: 'zz_other.dat', data: bytesOf(3000, 9) }, // not a sound file – must be copied as is
     ]) },

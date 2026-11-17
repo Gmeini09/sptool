@@ -5,6 +5,7 @@ import { canonicalArchiveName, findBaseCandidates, readBaseCandidate, type BaseC
 import { nativeInfo } from '../services/native';
 import { loadJSON, saveJSON, getBlob, putBlob, deleteBlob, removeKey } from '../services/storage';
 import { logger } from '../services/logger';
+import { ensureNgKeys, restoreNgKeys } from '../services/ngKeys';
 import { openPack, type Pack } from '../formats/pack';
 import { readRpfHeader } from '../formats/rpf';
 import { findGtaKey, hasGtaKey, isExactOriginal, NeedGtaKeyError, ORIGINAL_SIZES, originalArchive, setGtaKey } from '../formats/gtaOriginal';
@@ -75,6 +76,7 @@ export function restoreBase(): Promise<void> {
   restoring ??= (async () => {
     const info = baseInfo();
     if (!info) return;
+    await restoreNgKeys(); // kept from last time – lets SP Tool read and save NG archives like OpenIV
     const files: BaseFile[] = [];
     for (const n of info.names) { const b = await getBlob(blobKey(n)); if (b) files.push({ name: n, bytes: b }); }
     if (!files.length) return;
@@ -100,6 +102,8 @@ const hexBytes = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => par
  * app – read from the GTA5.exe in the GTA V folder.
  */
 export async function ensureGtaKey(dropped: File[] = []): Promise<void> {
+  // the NG keys come from the same GTA5.exe (plus CodeWalker's magic.dat) – without them long sounds cannot be saved
+  await ensureNgKeys(dropped).catch((e) => logger.warn(`NG-Schlüssel nicht geladen: ${e instanceof Error ? e.message : String(e)}`));
   if (hasGtaKey()) return;
   const exe = dropped.find((f) => /^gta5\.exe$/i.test(f.name));
   if (exe) {

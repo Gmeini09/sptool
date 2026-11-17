@@ -9,7 +9,8 @@
 // Inside a container the streams can be laid out anew: a muted stream (SILENCE) shrinks to a few milliseconds and
 // its bytes let a longer sound – a whole reload – keep its full length (creator packs do the same).
 import { monoMix, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
-import { exportPack, type Pack } from '../formats/pack';
+import { canGrowNow, exportPack, type Pack } from '../formats/pack';
+import { NeedNgKeysError } from '../formats/rpf';
 import { matchCatalog, streamsFor, type Mapping } from '../formats/mapping';
 import type { AudioData } from '../dsp/types';
 import type { WeaponProfile } from '../models/types';
@@ -162,7 +163,7 @@ function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | nul
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
   const streams = new Map<number, AwcStream>();
   for (const [id, audio] of wanted) streams.set(id, audio ? exactStream(orig(id), audio) : silentStream(orig(id)));
-  if (g.canGrow) return { streams, over: 0 };
+  if (canGrowNow(pack, g)) return { streams, over: 0 };
   // same sound in several streams (one reload for all pistols) is stored once – exportPack writes it that way too
   const size = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }, { share: true }).length;
   return { streams, over: Math.max(0, size - g.length) };
@@ -211,6 +212,8 @@ export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssi
       if (!tooLong.has(k) || tooLong.get(k)!.overSeconds < sec) tooLong.set(k, { labels: l, overSeconds: sec });
     }
   }
+  // the template could take the longer sound (original GTA files), only the keys to save it like OpenIV are missing
+  if (tooLong.size && [...want.keys()].some((gi) => pack.groups[gi].canGrow && !canGrowNow(pack, pack.groups[gi]))) throw new NeedNgKeysError();
   if (tooLong.size) throw new TooLongError([...tooLong.values()]);
   const outputs = exportPack(pack, byGroup, { includeUnchanged: opts.allArchives })
     .map((o) => ({ ...o, name: canonicalArchiveName(o.name) }));

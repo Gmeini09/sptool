@@ -1,6 +1,7 @@
 package main
 
-// /native/gta/awckey  – the AWC key from the player's own GTA5.exe (found by its SHA-1, never stored in SP Tool)
+// /native/gta/awckey  – the AWC key from the player's own GTA5.exe (found by its SHA-1, never stored in SP Tool),
+//                       plus the AES key ("aes") that unlocks CodeWalker's magic.dat for saving archives like OpenIV
 // /native/gta/sfx     – one original archive (WEAPONS_PLAYER.rpf / RESIDENT.rpf) from GTA V's x64/audio/sfx folder
 // Both are read only. The web side checks the archive against the known original (src/formats/gtaOriginal.ts).
 
@@ -19,6 +20,9 @@ import (
 )
 
 var awcKeySHA1, _ = hex.DecodeString("c31e0da1c7e5d85502e517290ed07b180a94e911")
+
+// aesKeySHA1: the 32-byte AES key of GTA V Legacy (the hash CodeWalker searches for)
+var aesKeySHA1, _ = hex.DecodeString("a0796128a775720ac204d9819f68c172e3952c6d")
 
 // originalSHA256: the untouched original archives (same as src/formats/gtaOriginal.ts)
 var originalSHA256 = map[string]string{
@@ -45,10 +49,19 @@ func gtaDirs(r *http.Request) []string {
 
 // findAwcKey scans the exe for the 16-byte key (8-byte aligned) by its SHA-1.
 func findAwcKey(exe []byte) []byte {
-	for p := 0; p+16 <= len(exe); p += 8 {
-		h := sha1.Sum(exe[p : p+16])
-		if bytes.Equal(h[:], awcKeySHA1) {
-			return append([]byte(nil), exe[p:p+16]...)
+	return findKey(exe, 16, awcKeySHA1)
+}
+
+// findAesKey scans the exe for the 32-byte AES key (8-byte aligned) by its SHA-1.
+func findAesKey(exe []byte) []byte {
+	return findKey(exe, 32, aesKeySHA1)
+}
+
+func findKey(exe []byte, size int, want []byte) []byte {
+	for p := 0; p+size <= len(exe); p += 8 {
+		h := sha1.Sum(exe[p : p+size])
+		if bytes.Equal(h[:], want) {
+			return append([]byte(nil), exe[p:p+size]...)
 		}
 	}
 	return nil
@@ -70,7 +83,11 @@ func gtaAPI(w http.ResponseWriter, r *http.Request) bool {
 				continue
 			}
 			if k := findAwcKey(exe); k != nil {
-				writeJSON(w, map[string]string{"key": hex.EncodeToString(k), "exe": filepath.Join(d, "GTA5.exe")})
+				out := map[string]string{"key": hex.EncodeToString(k), "exe": filepath.Join(d, "GTA5.exe")}
+				if a := findAesKey(exe); a != nil {
+					out["aes"] = hex.EncodeToString(a)
+				}
+				writeJSON(w, out)
 				return true
 			}
 		}

@@ -153,6 +153,21 @@ Inhaltsverzeichnis unverschlüsselt (`OPEN`, wie OpenIV/CodeWalker), jede unver�
   `weapons.awc` sind alle Dateien identisch mit dem Original, die Sounds werden in voller Länge gelesen (`tests/original.test.ts`, `tests/rpfwrite.test.ts`).
 - Noch offen: Test im Spiel (FiveM `mods`-Ordner und Einzelspieler mit OpenIV.asi lesen `OPEN`-Archive).
 
+**Ab 1.10.17: wie OpenIV (NG).** Alle 522 handgemachten Soundpack-Archive auf dem Entwickler-PC haben ein
+NG-verschlüsseltes Inhaltsverzeichnis; ersetzte Dateien liegen am Archivende, unveränderte an ihrer Original-Position
+(entschlüsselt mit CodeWalker). SP Tool macht es jetzt genauso (`appendRpfNg`, `src/formats/ngCrypto.ts`):
+
+- Die NG-Schlüssel stehen nicht mehr lesbar in der GTA5.exe. Wie CodeWalker nimmt SP Tool dessen `magic.dat`
+  (MIT, gepinnter Commit, SHA-256 geprüft), lädt sie beim Nutzer von GitHub und entschlüsselt sie mit dem AES-Schlüssel
+  aus dessen GTA5.exe (`src/services/ngKeys.ts`, Windows-App: `/native/gta/awckey` liefert zusätzlich `aes`).
+- Verschlüsseln kehrt jede Runde per Meet-in-the-Middle um (keine Look-up-Tabellen nötig). Test: Das entschlüsselte
+  Original-Inhaltsverzeichnis wird wieder zu exakt Rockstars Bytes verschlüsselt (`tests/ngcrypto.test.ts`).
+- Gegenprobe: CodeWalker öffnet die von SP Tool geschriebenen NG-Archive, außer `ptl_pistol.awc` / `weapons.awc` (am Ende
+  angehängt) ist alles original, die Sounds werden in voller Länge gelesen. `OPEN` wird nur noch für Archive benutzt,
+  die schon `OPEN` sind.
+- Pistol .50 = F02 `ptl_50cal.awc` (`0x0AE503E5`) + Kopie in `weapons.awc` (`0x1F246C4E`, gleiche Länge, Hüllkurve r = 0,999).
+  F04 `ptl_combat.awc` ist die Combat Pistol; die alte .50-Zuordnung dorthin ist in `RETIRED` (`src/formats/mapping.ts`).
+
 ## 8. Nachtrag 05.10.2026: deutsche Gangwar-/„Gambo“-Packs (nur Messwerte)
 
 Weitere 5 WEAPONS_PLAYER- und 9 RESIDENT-Archive vom Nutzer, zusammen mit den 6 bisherigen ausgewertet (`scripts/analyze-refs.ts`).

@@ -40,7 +40,7 @@ test('pistol shot: built into both archives, sizes unchanged, nothing else touch
   const before = streamToAudio(streamOf(pack, 'F03', 277856074)[0]).channels[0];
   const after = streamToAudio(streamOf(out, 'F03', 277856074)[0]).channels[0];
   assert.notDeepEqual(after, before, 'shot replaced');
-  // F02/F04 (MK2 / .50 candidates) untouched
+  // F02/F04 (.50 / Combat Pistol) untouched by a Pistol-only build
   for (const [f, id] of [['F02', 182780901], ['F04', 369994369]] as const) assert.deepEqual(streamOf(out, f, id)[0].data, streamOf(pack, f, id)[0].data);
   // both copies of F01 identical after the build
   const g = indexPack(out).get('F01')!;
@@ -64,7 +64,7 @@ test('a sound longer than the template has room for is never cut: the build stop
   });
 });
 
-test('shipped mapping: Pistol and .50 shots are written; the MK2 shares the Pistol file and never touches the .50 file (F02)', async () => {
+test('shipped mapping: Pistol and .50 shots are written (.50 = ptl_50cal, F02); the MK2 shares the Pistol file; the Combat Pistol (F04) stays', async () => {
   const pack = openPack(files);
   let p = newProject('t', 'x');
   for (const w of ['pistol', 'pistol_mk2', 'pistol50'] as const) p = assign(p, w, 'fire', { entryId: w });
@@ -77,8 +77,8 @@ test('shipped mapping: Pistol and .50 shots are written; the MK2 shares the Pist
   assert.deepEqual(plan.items[1].targets, plan.items[0].targets, 'same sound: MK2 = Pistol file');
   const r = await runBuild(plan, pack, async (a) => tone(0.2, a.entryId === 'pistol50' ? 110 : 330));
   const out = openPack(r.outputs);
-  assert.notDeepEqual(streamOf(out, 'F04', 369994369)[0].data, streamOf(pack, 'F04', 369994369)[0].data, 'F04 written');
-  assert.deepEqual(streamOf(out, 'F02', 182780901)[0].data, streamOf(pack, 'F02', 182780901)[0].data, 'F02 (ptl_50cal) untouched');
+  assert.notDeepEqual(streamOf(out, 'F02', 182780901)[0].data, streamOf(pack, 'F02', 182780901)[0].data, 'F02 (ptl_50cal) written');
+  assert.deepEqual(streamOf(out, 'F04', 369994369)[0].data, streamOf(pack, 'F04', 369994369)[0].data, 'F04 (ptl_combat, Combat Pistol) untouched');
   const t = buildGameTest(pack);
   assert.ok(t.groups.filter((g) => !g.freq).every((g) => g.found > 0), 'all shot candidates found in the pack');
   const m = applyGameTest(shipped, { 'pistol:fire': 3, 'pistol_mk2:fire': 1, 'pistol50:fire': 2 }).mapping;

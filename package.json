@@ -1,7 +1,7 @@
 {
   "name": "sp-tool",
   "productName": "SP Tool",
-  "version": "1.10.16",
+  "version": "1.10.17",
   "private": true,
   "description": "SP Tool – FiveM Soundpack Creator. Create. Preview. Build. Install.",
   "type": "module",

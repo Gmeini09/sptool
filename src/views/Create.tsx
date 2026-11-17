@@ -28,6 +28,7 @@ import { streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
 import { saveToDownloads, showDownloads } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
+import { ensureNgKeys } from '../services/ngKeys';
 import { checkInGame, sha256Hex, showSfxFolder, type CheckResult, type FileState } from '../services/modsCheck';
 import { openGameTest } from './GameTest';
 import { nativeInfo } from '../services/native';
@@ -281,6 +282,7 @@ export function CreateView() {
       if (rest) { const msg = nothingChangesMessage(pl, rest.label); if (msg) throw new Error(msg); }
       if (!pl.ready && !rest) throw new Error(pl.items.some((i) => i.status === 'not-in-base') ? 'In deiner Vorlage fehlen die Dateien für deine Auswahl – nimm ein Soundpack mit WEAPONS_PLAYER.rpf und RESIDENT.rpf.' : `Deine Auswahl wirkt im Spiel noch nicht: SP Tool weiß noch nicht, wo GTA ${blockedLabels(pl).join(', ')} ablegt. Wähl bei der Pistol einen Schuss oder mach den Test im Spiel.`);
       addProject(p, false);
+      await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
       const r = await runBuild(pl, pack, renderAssignment, (d, t, l) => { setBusy(d < t ? `Sound ${d + 1} von ${t} · ${l}` : 'WEAPONS_PLAYER.rpf und RESIDENT.rpf werden geschrieben…'); setProg(d < t ? d / t : null); }, { allowEmpty: !!rest, allArchives: true }); // always WEAPONS_PLAYER.rpf + RESIDENT.rpf
       if (sameAsBase(pack, r.outputs)) throw new Error(`Es hat sich nichts geändert – das Ergebnis wäre genau ${rest ? `„${rest.label}“` : 'deine Vorlage'}. ${blockedLabels(pl).length ? `${blockedLabels(pl).join(', ')} kann SP Tool noch nicht ins Spiel schreiben.` : 'Prüf, ob deine Sounds wirklich anders sind als die im Pack.'}`);
       const missing = ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf'].filter((n) => !r.outputs.some((o) => o.name.toLowerCase() === n.toLowerCase()));

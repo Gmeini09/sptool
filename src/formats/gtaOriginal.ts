@@ -6,8 +6,9 @@
 // read once from the player's own GTA5.exe – found by its SHA-1 like CodeWalker finds the keys – and kept on this
 // PC only. No Rockstar key is part of SP Tool.
 //
-// A replaced container is written unencrypted at the same place with the same size (the game reads plain AWC files,
-// creator packs are made the same way); every other file stays exactly as Rockstar shipped it.
+// A replaced container is written unencrypted (the game reads plain AWC files, creator packs are made the same way):
+// at the same place when it fits, otherwise appended like OpenIV with the table of contents encrypted again (rpf.ts →
+// appendRpfNg, keys: services/ngKeys.ts). Every other file stays exactly as Rockstar shipped it.
 import { parseAwc, AwcError } from './awc';
 import type { FoundAwc, TocFile } from './rpf';
 

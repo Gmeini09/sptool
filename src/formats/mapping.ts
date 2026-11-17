@@ -53,9 +53,20 @@ export const SERVER_MAPPING_KEY = 'sptool:mapping-server';
 function serverEntries(): MapEntry[] {
   try { const raw = localStorage.getItem(SERVER_MAPPING_KEY); return raw ? parseMapping(JSON.parse(raw)).entries : []; } catch { return []; }
 }
+/**
+ * Entries that were wrong and must not come back through an older published mapping on the license server or a
+ * local copy: up to 1.10.16 the Pistol .50 shot was mapped to the Combat Pistol's file (F04 = ptl_combat.awc and its
+ * copy in weapons.awc). The .50 is F02 = ptl_50cal.awc (weapon_profiles/mapping.json).
+ */
+export const RETIRED: ReadonlyArray<Pick<MapEntry, 'file' | 'stream' | 'weapon'>> = [
+  { file: 'F04', stream: 369994369, weapon: 'pistol50' },
+  { file: 'F01', stream: 509229805, weapon: 'pistol50' },
+];
+const retired = (e: MapEntry) => RETIRED.some((r) => r.file === e.file && r.stream === e.stream && r.weapon === e.weapon);
+
 /** Shipped + published mapping – what every user gets. */
 function baseMapping(): Mapping {
-  return { version: 1, updatedAt: 0, entries: dedupe([...parseMapping(shipped).entries, ...serverEntries()]) };
+  return { version: 1, updatedAt: 0, entries: dedupe([...parseMapping(shipped).entries, ...serverEntries().filter((e) => !retired(e))]) };
 }
 
 /** Shipped + published mapping + this PC's own edits (local edits win). */
@@ -68,7 +79,7 @@ export function loadMapping(): Mapping {
       const local = parseMapping(json);
       // shipped entries the user removed locally stay removed
       const removed = new Set<string>(Array.isArray(json.removed) ? json.removed.map(String) : []);
-      return { version: 1, updatedAt: local.updatedAt, entries: dedupe([...base.entries.filter((e) => !removed.has(ek(e))), ...local.entries]) };
+      return { version: 1, updatedAt: local.updatedAt, entries: dedupe([...base.entries.filter((e) => !removed.has(ek(e))), ...local.entries.filter((e) => !retired(e))]) };
     }
   } catch { /* corrupt local copy → shipped only */ }
   return base;

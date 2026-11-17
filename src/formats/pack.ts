@@ -7,11 +7,13 @@
 // Two ways to write a container back:
 //  • in place (same position, never larger): the table of contents stays exactly as it was – the only way for creator
 //    packs whose table of contents is encrypted.
-//  • rebuild: when the archive's file list is known (Rockstar's original or a plain table of contents) and a container
-//    grows, the whole archive is written anew with a plain table of contents (rpf.ts → writeRpfOpen). Every other file
-//    is copied byte for byte. Used only when something does not fit – otherwise nothing changes against before.
+//  • like OpenIV, when a container grows: the new file is appended at the end of the archive and the table of contents
+//    is encrypted again with NG (rpf.ts → appendRpfNg, needs the NG keys). An archive with a plain table of contents
+//    (OPEN) is rebuilt with writeRpfOpen. Every other file stays byte for byte. Used only when something does not
+//    fit – otherwise nothing changes against before.
 import { writeAwc, type AwcFile, type AwcStream } from './awc';
-import { findAwcs, knownToc, patchAwcInPlace, readRpfHeader, RpfError, writeRpfOpen, type FoundAwc, type RpfHeader, type TocFile } from './rpf';
+import { appendRpfNg, findAwcs, knownToc, NeedNgKeysError, patchAwcInPlace, readRpfHeader, RpfError, writeRpfOpen, type FoundAwc, type RpfHeader, type TocFile } from './rpf';
+import { activeNgKeys } from './ngCrypto';
 
 export interface PackArchive {
   name: string; bytes: Uint8Array; header: RpfHeader; containers: FoundAwc[];
@@ -21,10 +23,15 @@ export interface PackArchive {
 export interface ContainerRef { archive: number; index: number; offset: number; length: number; encrypted?: boolean }
 export interface ContainerGroup {
   id: number; awc: AwcFile; length: number; refs: ContainerRef[];
-  /** every copy lies in an archive SP Tool can rebuild: the container may get larger than `length` */
+  /** every copy lies in an archive whose file list is known (see canGrowNow for whether it may grow right now) */
   canGrow: boolean;
 }
 export interface Pack { archives: PackArchive[]; groups: ContainerGroup[] }
+
+/** An archive SP Tool can write larger containers into now: file list known, and for NG the keys are loaded. */
+export const archiveCanGrow = (a: PackArchive) => !!a.toc && (a.header.encryption !== 'ng' || !!activeNgKeys());
+/** The container may get larger than its place in the template (every archive holding a copy can grow). */
+export const canGrowNow = (pack: Pack, g: ContainerGroup) => g.canGrow && g.refs.every((r) => archiveCanGrow(pack.archives[r.archive]));
 
 function fnv1a(bytes: Uint8Array): number {
   let h = 0x811c9dc5;
@@ -40,7 +47,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 export function openPack(files: Array<{ name: string; bytes: Uint8Array }>): Pack {
   const archives: PackArchive[] = files.map((f) => ({
-    name: f.name, bytes: f.bytes, header: readRpfHeader(f.bytes), containers: findAwcs(f.bytes), toc: knownToc(f.bytes),
+    name: f.name, bytes: f.bytes, header: readRpfHeader(f.bytes), containers: findAwcs(f.bytes, f.name), toc: knownToc(f.bytes, f.name),
   }));
   const groups: ContainerGroup[] = [];
   const byHash = new Map<string, ContainerGroup[]>();
@@ -86,7 +93,8 @@ export function exportPack(pack: Pack, replacements: Map<number, Map<number, Awc
     if (!streams.size) continue;
     const g = pack.groups[gid];
     const awc = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }, { share: true });
-    if (awc.length > g.length && !g.canGrow) {
+    if (awc.length > g.length && !canGrowNow(pack, g)) {
+      if (g.canGrow) throw new NeedNgKeysError();
       throw new RpfError(`Container zu groß (${awc.length} statt höchstens ${g.length} Bytes) – die Vorlage ist ein Soundpack mit verschlüsseltem Inhaltsverzeichnis, dort können Sounds nicht länger werden. Nimm das Original-GTA-Soundpack als Vorlage.`);
     }
     for (const r of g.refs) perArchive[r.archive].set(r.offset, { ref: r, awc });
@@ -95,12 +103,16 @@ export function exportPack(pack: Pack, replacements: Map<number, Map<number, Awc
     const repl = perArchive[ai];
     if (!repl.size) return { name: a.name, bytes: a.bytes, patchedContainers: 0, rebuilt: false };
     const grows = [...repl.values()].some((x) => x.awc.length > x.ref.length);
-    if (!grows) {
-      let bytes = a.bytes;
-      for (const { ref, awc } of repl.values()) bytes = patchAwcInPlace(bytes, ref, fitContainer(awc, ref.length)); // copy-on-write
-      return { name: a.name, bytes, patchedContainers: repl.size, rebuilt: false };
-    }
+    // containers that fit go in place first (the table of contents stays as it is)
+    let bytes = a.bytes;
+    for (const { ref, awc } of repl.values()) if (awc.length <= ref.length) bytes = patchAwcInPlace(bytes, ref, fitContainer(awc, ref.length)); // copy-on-write
+    if (!grows) return { name: a.name, bytes, patchedContainers: repl.size, rebuilt: false };
     if (!a.toc) throw new RpfError(`${a.name}: Inhaltsverzeichnis unbekannt – das Archiv kann nicht neu aufgebaut werden.`);
+    if (a.header.encryption === 'ng') {
+      // like OpenIV: the larger files are appended, the table of contents is encrypted again with NG
+      const larger = new Map([...repl.values()].filter((x) => x.awc.length > x.ref.length).map((x) => [x.ref.offset, x.awc] as const));
+      return { name: a.name, bytes: appendRpfNg(bytes, a.name, larger), patchedContainers: repl.size, rebuilt: true };
+    }
     const files = a.toc.map((f) => ({ name: f.name, data: repl.get(f.offset)?.awc ?? a.bytes.subarray(f.offset, f.offset + f.length) }));
     const placed = new Set(a.toc.map((f) => f.offset));
     for (const off of repl.keys()) if (!placed.has(off)) throw new RpfError(`${a.name}: Container bei ${off} steht nicht im Inhaltsverzeichnis.`);

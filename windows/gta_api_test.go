@@ -25,4 +25,11 @@ func TestFindAwcKey(t *testing.T) {
 	if !bytes.Equal(h[:], awcKeySHA1) {
 		t.Fatal("wrong key")
 	}
+	a := findAesKey(exe)
+	if len(a) != 32 {
+		t.Fatal("AES key not found")
+	}
+	if ha := sha1.Sum(a); !bytes.Equal(ha[:], aesKeySHA1) {
+		t.Fatal("wrong AES key")
+	}
 }
