@@ -6,6 +6,12 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.16 – 17.11.2026
+- Kein „Passt nicht in die Vorlage … zu lang“ mehr mit dem Original-GTA-Soundpack als Vorlage: Ist ein Schuss oder Reload länger als der Platz in der Spieldatei, baut SP Tool WEAPONS_PLAYER.rpf bzw. RESIDENT.rpf komplett neu auf (offenes Inhaltsverzeichnis wie bei OpenIV). Dein Sound kommt in voller Länge ins Spiel – getestet mit 3 s Schuss und 4 s Reload
+- Alle anderen Dateien im Archiv bleiben Byte für Byte Rockstars Original; passt alles in den vorhandenen Platz, ändert sich gegenüber vorher nichts (das Inhaltsverzeichnis bleibt dann unverändert)
+- Mit einem fremden Soundpack als Vorlage (verschlüsseltes Inhaltsverzeichnis) gilt weiter die alte Grenze
+- Von SP Tool neu aufgebaute Soundpacks lassen sich wieder als Vorlage oder im Pack Analyzer öffnen
+
 ## 1.10.15 – 17.11.2026
 - Nachladen ist jetzt immer EIN ganzer Sound: Reload reinziehen, aus einem Soundpack holen oder einen freien Reload nehmen – fertig. „Einzelne Teile“, „In Teile schneiden“ und Magazin raus / Magazin rein / Schlitten / Nachladen fertig gibt es nicht mehr
 - Ein Reload, den SP Tool beim Import auf einer Waffen-Seite erkennt, kommt als ganzer Sound in den Schritt „Nachladen“

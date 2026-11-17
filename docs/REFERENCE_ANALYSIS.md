@@ -137,6 +137,22 @@ Die Packs unterscheiden sich deutlich: eines ist sehr dicht/komprimiert (Crest ~
 Neue Library-Stile *Balanced*, *Dense*, *Bright*; alle übrigen Engine-2-Schüsse werden leicht (50 %) Richtung *balanced* gezogen,
 Reload-/Mechanik-Sounds zu 90 % Richtung *reload*.
 
+## 9. Nachtrag 17.11.2026: Archive neu aufbauen (Container dürfen wachsen)
+
+Das entschlüsselte Inhaltsverzeichnis der Original-Archive (gegengeprüft mit CodeWalker) entspricht genau der Tabelle in
+`src/formats/gtaOriginal.ts`: ein Root-Ordner, alle Dateien unkomprimiert (`packedSize 0`), nicht RPF-verschlüsselt
+(`encrypted 0`), Namen in Eintragsreihenfolge, Namenstabelle auf 16 Byte, Dateien auf 512 Byte.
+
+Damit kann SP Tool die Archive ohne NG-Schlüssel komplett neu schreiben (`writeRpfOpen` in `src/formats/rpf.ts`):
+Inhaltsverzeichnis unverschlüsselt (`OPEN`, wie OpenIV/CodeWalker), jede unveränderte Datei Byte für Byte übernommen
+(Rockstars XXTEA-verschlüsselte AWCs bleiben verschlüsselt), ersetzte AWCs unverschlüsselt in beliebiger Größe.
+
+- Nur wenn ein Container nicht mehr in seinen Platz passt; sonst bleibt es beim In-place-Patch (NG-Inhaltsverzeichnis unverändert).
+- Nur für Archive mit bekannter Dateiliste (Original oder `OPEN`). Fremde Packs mit NG-Inhaltsverzeichnis behalten die Grenze.
+- Gegenprobe: Die von SP Tool gebauten Archive (3 s Schuss, 4 s Reload) öffnet CodeWalker fehlerfrei; außer `ptl_pistol.awc` bzw.
+  `weapons.awc` sind alle Dateien identisch mit dem Original, die Sounds werden in voller Länge gelesen (`tests/original.test.ts`, `tests/rpfwrite.test.ts`).
+- Noch offen: Test im Spiel (FiveM `mods`-Ordner und Einzelspieler mit OpenIV.asi lesen `OPEN`-Archive).
+
 ## 8. Nachtrag 05.10.2026: deutsche Gangwar-/„Gambo“-Packs (nur Messwerte)
 
 Weitere 5 WEAPONS_PLAYER- und 9 RESIDENT-Archive vom Nutzer, zusammen mit den 6 bisherigen ausgewertet (`scripts/analyze-refs.ts`).

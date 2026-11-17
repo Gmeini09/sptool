@@ -9,7 +9,7 @@
 // A replaced container is written unencrypted at the same place with the same size (the game reads plain AWC files,
 // creator packs are made the same way); every other file stays exactly as Rockstar shipped it.
 import { parseAwc, AwcError } from './awc';
-import type { FoundAwc } from './rpf';
+import type { FoundAwc, TocFile } from './rpf';
 
 interface OriginalArchive { name: string; size: number; toc: number; files: Array<[string, number, number]> }
 
@@ -156,9 +156,18 @@ function xxteaDecrypt(data: Uint8Array, key: Uint32Array): Uint8Array {
 export function originalContainers(bytes: Uint8Array): FoundAwc[] | null {
   const a = originalArchive(bytes);
   if (!a) return null;
+  return containersFromToc(bytes, a.files.map(([name, offset, length]) => ({ name, offset, length })));
+}
+
+/**
+ * The AWC files listed in a known table of contents (the original's, or a plain one SP Tool wrote): plain files are
+ * read as they are, files still encrypted by Rockstar are decrypted with the key from GTA5.exe.
+ */
+export function containersFromToc(bytes: Uint8Array, files: TocFile[]): FoundAwc[] {
   const out: FoundAwc[] = [];
   let key: Uint32Array | null = null;
-  for (const [, offset, length] of a.files) {
+  for (const { name, offset, length } of files) {
+    if (!/\.awc$/i.test(name) || length < 16) continue;
     const raw = bytes.subarray(offset, offset + length);
     const plain = isAdat(raw, 0);
     if (!plain) { key ??= loadKey(); if (!key) throw new NeedGtaKeyError(); }
@@ -166,7 +175,7 @@ export function originalContainers(bytes: Uint8Array): FoundAwc[] | null {
     if (!isAdat(d, 0)) throw new NeedGtaKeyError(); // wrong key (another GTA version)
     // Rockstar's flag for encrypted multi-channel data has no meaning for these single-channel files once decrypted
     new DataView(d.buffer, d.byteOffset, d.byteLength).setUint16(6, 0xff01, true);
-    try { out.push({ offset, length, awc: parseAwc(d), encrypted: !plain }); }
+    try { out.push({ offset, length, awc: parseAwc(d), encrypted: !plain, name }); }
     catch (e) { if (!(e instanceof AwcError)) throw e; /* not a sound file SP Tool can use (e.g. low_latency.awc) */ }
   }
   return out;

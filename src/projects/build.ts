@@ -3,7 +3,9 @@
 // The base pack is any soundpack whose archives contain the mapped original files unencrypted (all
 // creator packs do for the files they replaced). Every copy of a mapped file is patched – also when a
 // creator put the same file into both WEAPONS_PLAYER and RESIDENT – so the game cannot fall back to
-// an old copy. Container sizes never change (see rpf.ts), so the encrypted table of contents stays valid.
+// an old copy. With a creator pack as base, container sizes never change (see rpf.ts), so the encrypted table of
+// contents stays valid. With Rockstar's original as base, a container may grow: the archive is rebuilt with a plain
+// table of contents (pack.ts → exportPack), so long shots and reloads go in whole.
 // Inside a container the streams can be laid out anew: a muted stream (SILENCE) shrinks to a few milliseconds and
 // its bytes let a longer sound – a whole reload – keep its full length (creator packs do the same).
 import { monoMix, replaceStreamAudio, silentStream, streamToAudio, writeAwc, type AwcStream } from '../formats/awc';
@@ -151,12 +153,16 @@ function exactStream(o: AwcStream, audio: AudioData): AwcStream {
   return replaceStreamAudio(o, audio, { ...KEEP, sampleRate: sr });
 }
 
-/** Lays out one container 1 : 1: muted streams shrink, every sound keeps rate, length and level. over = bytes too many. */
+/**
+ * Lays out one container 1 : 1: muted streams shrink, every sound keeps rate, length and level. over = bytes too many.
+ * A container whose archives SP Tool can rebuild (original GTA template) may grow – then nothing is ever too long.
+ */
 function layoutGroup(pack: Pack, gi: number, wanted: Map<number, AudioData | null>): { streams: Map<number, AwcStream>; over: number } {
   const g = pack.groups[gi];
   const orig = (id: number) => g.awc.streams.find((s) => s.id === id)!;
   const streams = new Map<number, AwcStream>();
   for (const [id, audio] of wanted) streams.set(id, audio ? exactStream(orig(id), audio) : silentStream(orig(id)));
+  if (g.canGrow) return { streams, over: 0 };
   // same sound in several streams (one reload for all pistols) is stored once – exportPack writes it that way too
   const size = writeAwc({ ...g.awc, streams: g.awc.streams.map((s) => streams.get(s.id) ?? s) }, { share: true }).length;
   return { streams, over: Math.max(0, size - g.length) };

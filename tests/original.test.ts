@@ -56,6 +56,54 @@ test('original pack as template: every sound file opens, the pistol shot is writ
   assert.ok(changed.length > 0 && changed.every((o) => o >= 959488 && o < 959488 + 64512), `only ptl_pistol.awc changed (${changed.length} blocks)`);
 });
 
+test('original pack as template: a 3 s shot and a 4 s whole reload go in 1 : 1 – archives rebuilt, every other file is Rockstar\'s', { skip }, async () => {
+  const { SILENCE } = await import('../src/projects/build');
+  const { readPlainToc, readRpfHeader, knownToc } = await import('../src/formats/rpf');
+  const f = files();
+  const pack = openPack(f);
+  let p = assign(newProject('Lang', ''), 'pistol', 'fire', { entryId: 'shot' });
+  p = assign(p, 'pistol', 'mag_out', { entryId: 'reload' });
+  for (const s of ['mag_in', 'slide', 'reload_finish']) p = assign(p, 'pistol', s, { entryId: SILENCE });
+  const plan = planBuild(p, WEAPON_PROFILES, shipped, pack);
+  const sig = (sec: number, sr: number, k: number) => ({ sampleRate: sr, channels: [Float32Array.from({ length: Math.round(sec * sr) }, (_, i) => Math.sin(i * k) * 0.45 * (1 - i / (sec * sr)))] });
+  const shot = sig(3, 44100, 0.07), reload = sig(4, 48000, 0.013);
+  const r = await runBuild(plan, pack, async (a) => (a.entryId === 'shot' ? shot : reload), undefined, { allArchives: true });
+  for (const o of r.outputs) {
+    const src = f.find((s) => s.name === o.name)!;
+    assert.equal(readRpfHeader(o.bytes).encryption, 'open', `${o.name}: rebuilt with a plain table of contents`);
+    const before = knownToc(src.bytes)!, after = readPlainToc(o.bytes)!;
+    assert.deepEqual(after.map((x) => x.name), before.map((x) => x.name), `${o.name}: same files`);
+    let same = 0;
+    for (const b of before) {
+      const a = after.find((x) => x.name === b.name)!;
+      const eq = a.length === b.length && Buffer.compare(Buffer.from(o.bytes.subarray(a.offset, a.offset + a.length)), Buffer.from(src.bytes.subarray(b.offset, b.offset + b.length))) === 0;
+      if (eq) same++;
+      else assert.ok(['ptl_pistol.awc', 'weapons.awc'].includes(b.name), `${o.name}: only the pistol files change, not ${b.name}`);
+    }
+    assert.equal(same, before.length - 1, `${o.name}: every other file byte for byte Rockstar's`);
+  }
+  // opens again (plain replaced files + Rockstar's encrypted ones) and holds both sounds whole
+  const out = openPack(r.outputs);
+  const idx = indexPack(out);
+  const s = out.groups[idx.get('F03')![0]].awc.streams.find((x) => x.id === 277856074)!;
+  const a = streamToAudio(s).channels[0];
+  assert.equal(a.length, shot.channels[0].length, 'shot 3 s');
+  for (let i = 0; i < a.length; i += 997) assert.ok(Math.abs(a[i] - shot.channels[0][i]) < 1 / 16000);
+  const reloadIds = shipped.entries.filter((e) => e.weapon === 'pistol' && e.slot === 'mag_out' && e.file === 'F01').map((e) => e.stream);
+  const f01 = out.groups[idx.get('F01')![0]].awc.streams;
+  for (const id of reloadIds) {
+    const st = f01.find((x) => x.id === id)!;
+    assert.equal(st.format.samples, reload.channels[0].length, `reload ${id}: 4 s`);
+    assert.equal(st.format.sampleRate, 48000);
+  }
+  const outDir = process.env.SPTOOL_OUT_DIR;
+  if (outDir) {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(outDir, { recursive: true });
+    for (const o of r.outputs) writeFileSync(`${outDir}/${o.name}`, o.bytes);
+  }
+});
+
 test('only the untouched original is accepted – a custom pack patched in place (same size, same TOC) is not', { skip }, async () => {
   const f = files();
   assert.ok(await isExactOriginal('WEAPONS_PLAYER.rpf', f[0].bytes));
