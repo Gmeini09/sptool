@@ -685,6 +685,10 @@ export function CreateView() {
                 const es = await importAudioFiles(files.slice(0, 1), { weapon: 'universal', slot: KILL_SLOT });
                 if (es[0]) { setKill(es[0].id); void hear(es[0]); }
               }} />
+              <button className="create-source" onClick={() => setPackOpen(true)}>
+                <Icon name="box" size={22} />
+                <div><b>Aus einem Soundpack holen</b><div className="small muted">SP reinziehen, seine Sounds anhören und den Kill-Sound übernehmen.</div></div>
+              </button>
             </div>
             <div className="create-list">
               <div className={`create-item original${!kill ? ' sel' : ''}`} onClick={() => { engine.stop(); setKill(null); }}>
@@ -756,8 +760,9 @@ export function CreateView() {
           : <Button variant="primary" size="lg" icon="hammer" disabled={!!busy || (!plan.items.length && !rest) || (!!rest && !!nothingChangesMessage(plan, rest.label))} onClick={() => void create()}>{busy ? 'Wird erstellt…' : 'Soundpack erstellen'}</Button>}
       </div>
 
-      <PackSoundsDialog open={packOpen} onClose={() => setPackOpen(false)} onTakeRest={(t) => setRest(t)} hasReload={Object.keys(reloadIds()).length > 0} context={cur ? { weapon: cur, slot: 'fire' } : step === RELOAD_STEP ? { weapon: 'pistol', slot: 'reload' } : undefined}
+      <PackSoundsDialog open={packOpen} onClose={() => setPackOpen(false)} onTakeRest={(t) => setRest(t)} hasReload={Object.keys(reloadIds()).length > 0} context={cur ? { weapon: cur, slot: 'fire' } : step === RELOAD_STEP ? { weapon: 'pistol', slot: 'reload' } : step === KILL_STEP ? { weapon: KILL_WEAPON, slot: KILL_SLOT } : undefined}
         onUse={(t, e) => {
+          if (t.slot === KILL_SLOT) { setKill(e.id); return; }
           if (t.slot === 'fire' && t.weapon !== 'reload') { pickFire(t.weapon, e.id); return; }
           if (t.slot === 'whole') {
             // the whole reload as ONE sound (starts with the reload); the other parts are made silent
