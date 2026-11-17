@@ -21,11 +21,14 @@ import { Button, Modal } from './ui';
 export interface SlotTarget { weapon: WeaponId; slot: string }
 const RELOAD = [['mag_out', 'Magazin raus'], ['mag_in', 'Magazin rein'], ['slide', 'Schlitten'], ['reload_finish', 'Nachladen fertig']] as const;
 
-/** Target options: every pistol shot + the reload parts (reload parts count for all pistols). */
+/** The kill sound is one sound for every weapon; the project keeps it on the Pistol. */
+const KILL_TARGET = 'pistol:kill';
+/** Target options: every pistol shot, the reload parts (they count for all pistols) and the kill sound. */
 const TARGETS: Array<{ value: string; label: string }> = [
   ...WEAPON_PROFILES.map((p) => ({ value: `${p.id}:fire`, label: `${p.displayName} · Schuss` })),
   { value: 'reload:whole', label: 'Nachladen · Ganzer Reload (ein Sound)' },
   ...RELOAD.map(([s, l]) => ({ value: `reload:${s}`, label: `Nachladen · ${l}` })),
+  { value: KILL_TARGET, label: 'Kill-Sound (alle Waffen)' },
 ];
 
 export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, hasReload, onTakeRest }: {
@@ -58,6 +61,12 @@ export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, 
   const fileRef = useRef<HTMLInputElement>(null);
   const playing = usePlayingKey();
 
+  // kill step: the kill sound is none of the pistol sounds – show the whole pack right away (before anything loads)
+  useEffect(() => {
+    if (!open || context?.slot !== 'kill' || allRef.current) return;
+    allRef.current = true; setAll(true);
+    if (pack) load(pack.pack, pack.label);
+  }, [open, context?.slot]);
   useEffect(() => {
     if (!open) { engine.stop(); return; }
     setDone({});
@@ -75,7 +84,9 @@ export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, 
     return Object.fromEntries(ex.map((x) => {
       const isReload = !!x.slot && /^(mag_out|mag_in|slide|reload_finish)$/.test(x.slot);
       let t = '';
-      if (context?.slot === 'fire') t = x.kind === 'shot' ? `${context.weapon}:fire` : '';
+      // kill step: any sound of the pack can be the kill sound – "Nehmen" takes it straight away
+      if (context?.slot === 'kill') t = KILL_TARGET;
+      else if (context?.slot === 'fire') t = x.kind === 'shot' ? `${context.weapon}:fire` : '';
       else if (context?.slot === 'reload') t = x.kind === 'mechanical' ? (x.whole && !isReload ? 'reload:whole' : `reload:${isReload ? x.slot : reloadOrder[r++ % reloadOrder.length]}`) : '';
       else if (x.weapon && x.slot) t = `${isReload ? 'reload' : x.weapon}:${x.slot}`;
       return [x.key, t];
@@ -104,6 +115,13 @@ export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, 
   const autoTake = async (ex: Extracted[]) => {
     if (!onUse || !context) return;
     const got: string[] = [];
+    if (context.slot === 'kill') {
+      // only a kill sound SP Tool knows for sure (in-game search test) is taken by itself – nothing is guessed
+      const known = ex.find((x) => x.slot === 'kill');
+      if (known) { await save(known, true, KILL_TARGET); toast('success', 'Automatisch übernommen', 'Kill-Sound aus dem Soundpack'); }
+      else toast('info', 'Kill-Sound noch unbekannt', 'SP Tool weiß noch nicht, wo GTA den Kill-Sound ablegt. Hör die Sounds des Packs an und klick beim richtigen auf „Nehmen“.');
+      return;
+    }
     if (context.slot === 'fire') {
       const shots = ex.filter((x) => x.kind === 'shot');
       const best = shots.find((x) => x.weapon === context.weapon && x.slot === 'fire') ?? shots.find((x) => x.weapon && x.slot === 'fire') ?? shots[0];
@@ -142,7 +160,7 @@ export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, 
   const save = async (x: Extracted, use: boolean, forced?: string) => {
     const t = forced ?? target[x.key] ?? '';
     const [w, slot] = t ? t.split(':') : ['universal', x.kind === 'shot' ? 'fire' : 'mag_in'];
-    const weapon = (w === 'reload' ? 'universal' : w) as WeaponId | 'universal';
+    const weapon = (w === 'reload' || slot === 'kill' ? 'universal' : w) as WeaponId | 'universal';
     const storeSlot = slot === 'whole' ? 'mag_out' : slot;
     const name = `${labelRef.current} · ${x.label.replace(/ \(.*\)$/, '')}`;
     const e = await addAudioEntry(x.audio, name, { weapon, slot: storeSlot }, `Aus Soundpack ${labelRef.current}`);
@@ -170,13 +188,14 @@ export function PackSoundsDialog({ open, onClose, onUse, context, initialFiles, 
         </div>
         {context?.slot === 'fire' && onUse && <p className="small muted" style={{ margin: '0 0 10px' }}>„Nehmen“ macht den Sound zum Schuss der <b>{WEAPON_PROFILES.find((p) => p.id === context.weapon)?.displayName}</b> – egal von welcher Waffe er im Pack war.</p>}
         {context?.slot === 'reload' && onUse && <p className="small muted" style={{ margin: '0 0 10px' }}>„Nehmen“ legt den Sound in den gewählten Nachlade-Teil.</p>}
+        {context?.slot === 'kill' && onUse && <p className="small muted" style={{ margin: '0 0 10px' }}>„Nehmen“ macht den Sound zu deinem <b>Kill-Sound</b>. Mit ✓ markiert ist nur ein Kill-Sound, den SP Tool aus dem Suchtest sicher kennt – sonst die Sounds des Packs anhören und den richtigen nehmen.</p>}
         <input ref={fileRef} type="file" accept=".rpf,.zip,.rar,.7z" multiple hidden onChange={(e) => { void take(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
         <div className={`base-drop${over ? ' over' : ''}`} role="button" tabIndex={0} onClick={() => fileRef.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(Array.from(e.dataTransfer.files)); }}>
           <Icon name="upload" size={22} />
           <div><b>{pack ? `Geöffnet: ${pack.label}` : 'Soundpack hierher ziehen'}</b><div className="small muted">{pack ? 'Ein anderes Pack reinziehen oder klicken.' : 'ZIP des Packs – oder WEAPONS_PLAYER.rpf und RESIDENT.rpf (beide zusammen ergeben den vollen Schuss).'}</div></div>
         </div>
-        {onUse && context && !simple && <label className="row small muted" style={{ gap: 6, marginTop: 8 }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />Beim Reinziehen automatisch übernehmen (Schuss für diese Waffe{context.slot === 'fire' && hasReload ? '' : ' + ganzer Reload'})</label>}
+        {onUse && context && !simple && <label className="row small muted" style={{ gap: 6, marginTop: 8 }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />Beim Reinziehen automatisch übernehmen ({context.slot === 'kill' ? 'Kill-Sound, wenn SP Tool ihn kennt' : `Schuss für diese Waffe${context.slot === 'fire' && hasReload ? '' : ' + ganzer Reload'}`})</label>}
         {pack && (onTakeRest || (filesRef.current && !simple)) && (
           <div className="ps-whole">
             <div className="grow"><b>Das ganze SP verwenden</b><div className="small muted">Für alles, was du nicht selbst auswählst: Reload, Nachhall, stumm geschaltete Original-Sounds, andere Waffen – genau wie im Pack.</div></div>
