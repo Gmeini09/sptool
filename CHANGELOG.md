@@ -6,6 +6,12 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.15 – 17.11.2026
+- Nachladen ist jetzt immer EIN ganzer Sound: Reload reinziehen, aus einem Soundpack holen oder einen freien Reload nehmen – fertig. „Einzelne Teile“, „In Teile schneiden“ und Magazin raus / Magazin rein / Schlitten / Nachladen fertig gibt es nicht mehr
+- Ein Reload, den SP Tool beim Import auf einer Waffen-Seite erkennt, kommt als ganzer Sound in den Schritt „Nachladen“
+- Aus einem Soundpack: der Reload des Packs wird als ganzer Sound übernommen („Pistol · Nachladen“)
+- Die zwei kurzen Magazin-Klicks unter den freien Reload-Sounds sind raus – sie waren kein ganzer Reload
+
 ## 1.10.14 – 17.11.2026
 - Behoben: „Passt nicht in die Vorlage … zusammen X s zu lang“ beim Nachladen. Der Reload steckt für alle drei Pistolen in 14 Stellen der großen gemeinsamen Spieldatei – SP Tool hat ihn 14-mal einzeln gespeichert, dafür war kein Platz. Jetzt wird ein gleicher Sound in einer Datei nur einmal gespeichert und alle Stellen zeigen darauf. Dadurch passt auch ein langer Reload (getestet bis 4 s)
 - Kill-Sound: Neuer Knopf „Aus einem Soundpack holen“ – SP reinziehen, Sounds anhören, beim richtigen „Nehmen“. Ist der Kill-Sound aus dem Suchtest bekannt, holt SP Tool ihn beim Reinziehen automatisch
