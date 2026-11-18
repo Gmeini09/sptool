@@ -3,7 +3,7 @@
 // soundpack you have, or pick one from the library – or keep the original. Nothing is installed and no backups
 // are made: WEAPONS_PLAYER.rpf + RESIDENT.rpf go as one ZIP to Downloads › SP Tool › <name>.zip.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addProject, FILES_DROPPED, getState, removeUserEntry, setState, toast, useApp } from '../app/store';
+import { addProject, FILES_DROPPED, getState, removeUserEntry, setState, toast, updateSettings, useApp } from '../app/store';
 import { engine } from '../audio/engine';
 import { previewEntry, usePlayingKey } from '../audio/preview';
 import { BasePicker, useBase } from '../components/BasePicker';
@@ -26,13 +26,15 @@ import { SoundEditorOverlay } from './Editor';
 import { openPack, type Pack } from '../formats/pack';
 import { streamToAudio } from '../formats/awc';
 import { assign, newProject, slotMatches, usedEntryIds, type Project } from '../projects/project';
-import { saveToDownloads, showDownloads } from '../services/downloads';
+import { pickExportFolder, saveToDownloads, saveToFolder, showDownloads, showFolder } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
 import { ensureNgKeys } from '../services/ngKeys';
 import { checkInGame, sha256Hex, showSfxFolder, type CheckResult, type FileState } from '../services/modsCheck';
 import { openGameTest } from './GameTest';
 import { nativeInfo } from '../services/native';
 import { logger } from '../services/logger';
+import { ENGINE_WEAPON, engineAvailable, engineBuild, engineReady, engineStatus, sharedSounds, type EngineSound, type EngineStatus, type SharedSounds } from '../services/spEngine';
+import { EngineImport } from '../components/EngineImport';
 import { WEAPON_PROFILES } from '../weapons/profiles';
 
 const WEAPONS = WEAPON_PROFILES.map((p) => p.id as WeaponId); // pistol, pistol_mk2, pistol50
@@ -41,6 +43,10 @@ const RELOAD_SLOTS = ['mag_out', 'mag_in', 'slide', 'reload_finish'] as const;
 const RELOAD_SLOT = RELOAD_SLOTS[0];
 const ORIGINAL = 'original';
 const label = (w: WeaponId) => WEAPON_PROFILES.find((p) => p.id === w)!.displayName;
+/** "C:\Users\x\OneDrive - Firma\Desktop\Packs" → "Packs" (Ordnername) und "Desktop" (übergeordneter Ordner). */
+const folderParts = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+const folderLeaf = (p: string) => folderParts(p).at(-1) ?? p;
+const folderParent = (p: string) => { const s = folderParts(p); return s.length > 1 ? s.at(-2)!.replace(/:$/, ':\\') : ''; };
 const STEPS = [...WEAPONS.map(label), 'Nachladen', 'Kill-Sound', 'Fertig'];
 const RELOAD_STEP = WEAPONS.length, KILL_STEP = WEAPONS.length + 1, DONE_STEP = WEAPONS.length + 2;
 // the kill sound is one sound for every weapon; the project keeps it on the Pistol (see GLOBAL_WEAPON in searchTest)
@@ -99,7 +105,26 @@ export function CreateView() {
   const [packOpen, setPackOpen] = useState(false);
   const [rest, setRest] = useState<Transplant | null>(null);
   const [showLib, setShowLib] = useState(false);
-  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; built: Array<{ name: string; sha256: string }>; pack: Pack; template: string } | null>(null);
+  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; built: Array<{ name: string; sha256: string }>; pack: Pack | null; template: string; exportDir?: string; files?: Array<{ name: string; bytes: Uint8Array }> } | null>(null);
+  // Windows-App: in einen gewählten Ordner exportieren (einmal wählen, wird gemerkt)
+  const exportPath = useApp((s) => s.settings.exportPath ?? '');
+  const chooseFolder = async (): Promise<string | null> => {
+    const f = await pickExportFolder(exportPath);
+    if (f) updateSettings({ exportPath: f });
+    return f;
+  };
+  const exportElsewhere = async () => {
+    if (!done?.files) return;
+    try {
+      const f = await chooseFolder();
+      if (!f) return;
+      const saved = await saveToFolder(f, done.files);
+      setDone({ ...done, ...saved, exportDir: f });
+      toast('success', 'Exportiert', `${saved.names.join(' + ')} → ${f}`);
+    } catch (e) {
+      toast('error', 'Export fehlgeschlagen', e instanceof Error ? e.message : String(e));
+    }
+  };
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const runCheck = async () => {
@@ -118,13 +143,34 @@ export function CreateView() {
     return () => window.removeEventListener(FILES_DROPPED, f);
   }, []);
   useEffect(() => { void nativeInfo().then((n) => setNative(!!n)).catch(() => setNative(false)); }, []);
+  // Windows-App mit Engine: wer sich im Spiel einen Schuss teilt, kommt aus den Spieldaten statt aus SAME_SOUND (Vermutung).
+  const gtaPath = useApp((s) => s.settings.gtaPath);
+  const [shared, setShared] = useState<SharedSounds | null>(null);
+  // Engine: GTA da, oder ohne GTA mit einmal importierten Originalen bereit? Sonst Einmal-Import anbieten.
+  const [engStatus, setEngStatus] = useState<EngineStatus | null>(null);
+  const [engRev, setEngRev] = useState(0);
+  const refreshEngine = () => setEngRev((n) => n + 1);
+  useEffect(() => { let live = true; void engineStatus().then((s) => { if (live) setEngStatus(s); }); return () => { live = false; }; }, [gtaPath, engRev]);
+  useEffect(() => { let live = true; void sharedSounds('fire').then((r) => { if (live) setShared(r); }); return () => { live = false; }; }, [gtaPath, engRev]);
   useEffect(() => () => engine.stop(), []);
   // "Alle löschen" asks once more before the imported sounds of this step are gone
   const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => { engine.stop(); setShowLib(false); setRecog([]); setConfirmClear(false); }, [step]);
 
   const cur: WeaponId | null = step < WEAPONS.length ? WEAPONS[step] : null;
-  const pickFire = (w: WeaponId, id: string | null) => setFire((f) => ({ ...f, [w]: id }));
+  /** Waffe, mit der `w` im Spiel denselben Schuss teilt (Pistol ↔ MK2) – aus der Engine, sonst aus SAME_SOUND. */
+  const fireTwin = (w: WeaponId): WeaponId | null => {
+    if (shared && ENGINE_WEAPON[w]) return (shared[`${w}:fire`] as WeaponId | null) ?? null;
+    const a = SAME_SOUND[`${w}:fire`];
+    if (a?.slot === 'fire') return a.weapon as WeaponId;
+    const rev = Object.entries(SAME_SOUND).find(([k, v]) => k.endsWith(':fire') && v.slot === 'fire' && v.weapon === w);
+    return rev ? (rev[0].split(':')[0] as WeaponId) : null;
+  };
+  // ein Schuss für beide: was bei der Pistol oder der MK2 gewählt wird, gilt für beide (im Spiel ist es dieselbe Datei)
+  const pickFire = (w: WeaponId, id: string | null) => setFire((f) => {
+    const twin = fireTwin(w);
+    return { ...f, [w]: id, ...(twin ? { [twin]: id } : {}) };
+  });
   const importReload = async (file: File) => {
     setBusy('Reload wird übernommen…');
     const e = await importWholeReload(file);
@@ -257,6 +303,7 @@ export function CreateView() {
 
   const copyReport = async () => {
     if (!done) return;
+    if (!done.pack) { toast('info', 'Kein Bericht möglich', 'Das erstellte Soundpack ließ sich nicht wieder öffnen – der Engine-Bericht steht im Protokoll.'); return; }
     setBusy('Bericht wird erstellt…');
     try {
       const text = await soundReport(done.plan, done.pack, renderAssignment, { name: done.folder, template: done.template, soundName: (id) => entryById(id)?.name ?? id });
@@ -267,9 +314,64 @@ export function CreateView() {
     finally { setBusy(null); }
   };
 
+  /**
+   * Windows-App mit Soundpack-Engine: die Engine sucht die Einträge in den GTA-Spieldaten selbst, schreibt
+   * WEAPONS_PLAYER.rpf + RESIDENT.rpf aus den Originalen im GTA-Ordner und prüft das Ergebnis. Keine Vorlage nötig.
+   */
+  const createWithEngine = async () => {
+    // zuerst der Zielordner (einmal wählen, danach gemerkt) – dorthin kommen WEAPONS_PLAYER.rpf + RESIDENT.rpf
+    const target = exportPath || await chooseFolder();
+    if (!target) throw new Error('Kein Ordner gewählt – wähl, wohin dein Soundpack exportiert werden soll.');
+    const p = project();
+    const sounds: EngineSound[] = [];
+    const written = new Set<string>(); // "weapon:slot" der Projekt-Slots, die die Engine schreibt
+    for (const [n, w] of WEAPONS.entries()) {
+      // ein Schuss für beide: hat die Partnerwaffe (Pistol ↔ MK2) einen Schuss, gilt der auch hier
+      const twin = fireTwin(w);
+      const f = twin && fire[twin] && fire[twin] !== ORIGINAL && WEAPONS.indexOf(twin) < n ? fire[twin] : fire[w];
+      if (f && f !== ORIGINAL) {
+        setBusy(`Sound ${n + 1} wird berechnet · ${label(w)} · Schuss`);
+        sounds.push({ weapon: ENGINE_WEAPON[w], slot: 'fire', audio: await renderAssignment({ entryId: f }) });
+        written.add(`${w}:fire`);
+      }
+      if (reload.id && reload.weapons.includes(w)) {
+        setBusy(`Nachladen wird berechnet · ${label(w)}`);
+        sounds.push({ weapon: ENGINE_WEAPON[w], slot: 'reload', audio: await renderAssignment({ entryId: reload.id }) });
+        for (const s of RELOAD_SLOTS) written.add(`${w}:${s}`);
+      }
+    }
+    if (!sounds.length) throw new Error(kill ? 'Der Kill-Sound kann mit der Soundpack-Engine noch nicht geschrieben werden – wähl einen Schuss oder Reload.' : 'Du hast keinen eigenen Schuss und keinen Reload gewählt.');
+    if (kill) toast('warning', 'Kill-Sound bleibt original', 'Den Kill-Sound kennt die Soundpack-Engine noch nicht – Schuss und Nachladen werden geschrieben.');
+    if (rest) toast('info', '„Reload & Rest“ wird nicht benutzt', 'Die Soundpack-Engine baut immer aus Rockstars Original-Dateien.');
+    addProject(p, false);
+    const r = await engineBuild(p.name, sounds, (s) => setBusy(s));
+    for (const n of r.result.notes) logger.info(`Engine: ${n}`);
+    for (const w of r.result.warnings) logger.warn(`Engine: ${w}`);
+    logger.info(`Engine-Bericht:\n${r.result.report}`);
+    if (r.result.warnings.length) toast('info', 'Tipp zu deinen Sounds', r.result.warnings.slice(0, 3).join(' '));
+    const orig = r.result.notes.filter((n) => /Original/.test(n) && /GTA-Ordner/.test(n));
+    if (orig.length) toast('info', 'Mit Rockstars Originalen gebaut', orig.join(' '));
+    setBusy('Wird in deinen Ordner exportiert…'); setProg(null);
+    const saved = await saveToFolder(target, r.outputs);
+    logger.info(`Soundpack erstellt (Engine): ${p.name} – ${r.result.replacedStreams} Sounds ersetzt, ${r.result.mutedStreams} stumm → ${saved.dir}\\${saved.names.join(', ')}`);
+    const built = await Promise.all(r.outputs.map(async (o) => ({ name: o.name, sha256: await sha256Hex(o.bytes) })));
+    await ensureNgKeys().catch(() => { /* nur für Bericht/Vorschau */ });
+    let pack: Pack | null = null;
+    try { pack = openPack(r.outputs); } catch { pack = base?.pack ?? null; }
+    const planned = planBuild(p, WEAPON_PROFILES, loadMapping(), pack);
+    const pl: BuildPlan = { ...planned, items: planned.items.map((i) => (written.has(`${i.weapon}:${i.slot}`) ? { ...i, status: 'ready' as const } : i)) };
+    setCheck(null);
+    setDone({ ...saved, folder: p.name, plan: pl, built, pack, template: `Rockstars Original-Dateien (geprüft, Spielversion ${r.result.gameVersion})`, exportDir: target, files: r.outputs });
+  };
+
   const create = async () => {
     setBusy('Vorlage wird vorbereitet…'); setProg(null);
     try {
+      if (await engineAvailable()) {
+        // Windows-App: immer die Engine (aus Rockstars Originalen) – mit GTA-Ordner oder ohne GTA nach dem Einmal-Import
+        if (!(await engineReady())) { refreshEngine(); throw new Error('Auf diesem PC ist kein GTA V. Richte oben einmal „Ohne GTA erstellen“ ein (Original-Dateien + GTA5.exe), dann geht es los.'); }
+        await createWithEngine(); return;
+      }
       // "Reload & Rest" of another SP: its archives are the base of this build (the whole SP, untouched), the
       // current template only fills in an archive that SP does not have
       // the template is checked every time: a template without RESIDENT.rpf is completed from another pack on the PC
@@ -398,16 +500,26 @@ export function CreateView() {
         <div className="panel create-done">
           <DoneMark />
           <h2>{done.folder} ist fertig!</h2>
-          <p className="muted"><b>{done.zip}</b> liegt {done.dir ? <>in <b>Downloads › SP Tool</b></> : 'in deinem Download-Ordner'} ({done.names.join(' + ')}). Nichts wurde automatisch installiert.</p>
-          <p className="small muted">Vorlage: <b>{done.template}</b> – Waffen und Sounds, die du nicht geändert hast, klingen wie in diesem Soundpack.</p>
-          <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="info" size={16} /><div>
+          {done.exportDir
+            ? <p className="muted"><b>{done.names.join(' + ')}</b> {done.names.length > 1 ? 'liegen' : 'liegt'} in <b className="mono">{done.exportDir}</b>.</p>
+            : <p className="muted"><b>{done.zip}</b> liegt {done.dir ? <>in <b>Downloads › SP Tool</b></> : 'in deinem Download-Ordner'} ({done.names.join(' + ')}). Nichts wurde automatisch installiert.</p>}
+          <p className="small muted">Grundlage: <b>{done.template}</b>{done.exportDir ? ' – alles, was du nicht geändert hast, klingt wie im Original-GTA.' : ' – Waffen und Sounds, die du nicht geändert hast, klingen wie in diesem Soundpack.'}</p>
+          {done.exportDir && <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="info" size={16} /><div>
+            <b>So kommt es ins Spiel:</b>
+            <ol style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              <li><b>FiveM bzw. GTA komplett schließen</b> – die Sounds werden nur beim Start gelesen.</li>
+              <li><b>{done.names.join(' + ')}</b> <b>direkt</b> in deinen <b>sfx</b>-Ordner kopieren (<span className="mono">Grand Theft Auto V\x64\audio\sfx</span>) und <b>„Dateien im Ziel ersetzen“</b> wählen. Sichere vorher einmal die Originaldateien von GTA.</li>
+              <li>FiveM starten.</li>
+            </ol>
+          </div></div>}
+          {!done.exportDir && <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="info" size={16} /><div>
             <b>So kommt es ins Spiel:</b>
             <ol style={{ margin: '4px 0 0', paddingLeft: 18 }}>
               <li><b>FiveM bzw. GTA komplett schließen</b> – die Sounds werden nur beim Start gelesen.</li>
               <li>ZIP öffnen und <b>{done.names.join(' + ')}</b> <b>direkt</b> in deinen <b>sfx</b>-Ordner ziehen (<span className="mono">Grand Theft Auto V\x64\audio\sfx</span>) und <b>„Dateien im Ziel ersetzen“</b> wählen. Sichere vorher einmal die Originaldateien von GTA.</li>
               <li>Klick auf <b>„Prüfen“</b> – SP Tool sagt dir, ob wirklich dein neues Pack drinliegt. Dann FiveM starten.</li>
             </ol>
-          </div></div>
+          </div></div>}
           {works.length > 0 && <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="check" size={16} /><div><b>Wirkt im Spiel: {works.join(', ')}.</b></div></div>}
           {!done.names.some((n) => n.toLowerCase() === 'resident.rpf') && <div className="callout small" style={{ textAlign: 'left' }}><Icon name="alert" size={16} /><div><b>RESIDENT.rpf fehlt.</b> Deine Vorlage hat keine RESIDENT.rpf, deshalb ist nur WEAPONS_PLAYER.rpf entstanden. Zieh unter „Noch eins erstellen“ → „Soundpack erstellen“ ein komplettes Soundpack (ZIP oder WEAPONS_PLAYER.rpf + RESIDENT.rpf) als Vorlage rein und erstelle es noch einmal.</div></div>}
           {kept.length > 0 && <div className="callout small" style={{ textAlign: 'left' }}><Icon name="alert" size={16} /><div className="grow"><b>Noch ohne Wirkung: {kept.join(', ')}.</b> Diese Sounds bleiben im Spiel wie in der Vorlage, bis SP Tool weiß, wo GTA sie ablegt. Mit dem <b>Test im Spiel</b> findest du das in zwei Minuten heraus – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>}
@@ -425,9 +537,12 @@ export function CreateView() {
             </div>
           )}
           <div className="row" style={{ gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
-            {done.dir && <Button variant="primary" icon="folder" onClick={() => void showDownloads()}>ZIP zeigen</Button>}
-            {done.dir && <Button icon="folder" onClick={() => void showSfxFolder().then((ok) => { if (!ok) toast('error', 'sfx-Ordner nicht gefunden', 'Trag den GTA-V-Ordner unter Einstellungen ein.'); })}>sfx-Ordner öffnen</Button>}
-            {done.dir && <Button icon="search" disabled={checking} onClick={() => void runCheck()}>{checking ? 'Prüft…' : 'Prüfen'}</Button>}
+            {done.exportDir && <Button variant="primary" icon="folder" onClick={() => void showFolder(done.exportDir!)}>Ordner öffnen</Button>}
+            {done.exportDir && <Button icon="folder" onClick={() => void showSfxFolder().then((ok) => { if (!ok) toast('error', 'sfx-Ordner nicht gefunden', 'Trag den GTA-V-Ordner unter Einstellungen ein.'); })}>sfx-Ordner öffnen</Button>}
+            {done.exportDir && <Button icon="folder" onClick={() => void exportElsewhere()}>Anderen Ordner wählen</Button>}
+            {done.dir && !done.exportDir && <Button variant="primary" icon="folder" onClick={() => void showDownloads()}>ZIP zeigen</Button>}
+            {done.dir && !done.exportDir && <Button icon="folder" onClick={() => void showSfxFolder().then((ok) => { if (!ok) toast('error', 'sfx-Ordner nicht gefunden', 'Trag den GTA-V-Ordner unter Einstellungen ein.'); })}>sfx-Ordner öffnen</Button>}
+            {done.dir && !done.exportDir && <Button icon="search" disabled={checking} onClick={() => void runCheck()}>{checking ? 'Prüft…' : 'Prüfen'}</Button>}
             <Button icon="copy" disabled={!!busy} title="Kopiert einen Bericht, was genau ins Spiel geschrieben wurde – zum Weiterschicken ans SP-Tool-Team" onClick={() => void copyReport()}>Klingt im Spiel anders?</Button>
             <Button icon="plus" onClick={() => { setDone(null); setCheck(null); setStep(0); }}>Noch eins erstellen</Button>
           </div>
@@ -450,6 +565,8 @@ export function CreateView() {
           ))}
         </ol>
       </div>
+
+      {engStatus && !engStatus.gta && !engStatus.offline && <EngineImport status={engStatus} onChange={refreshEngine} />}
 
       {cur && (
         <div className="panel"><div className="panel-body">
@@ -504,15 +621,15 @@ export function CreateView() {
               {fireLib(cur).map((e) => <SoundRow key={e.id} e={e} sel={fire[cur] === e.id} playing={playing} extra={e.featured ? `★ ${e.style}` : e.style} onPick={() => { pickFire(cur, e.id); void hear(e); }} />)}
             </div>
           </>}
-          {cur && SAME_SOUND[`${cur}:fire`] && (() => {
-            const other = SAME_SOUND[`${cur}:fire`].weapon as WeaponId, mine = fire[cur], theirs = fire[other];
-            const both = !!mine && mine !== ORIGINAL && !!theirs && theirs !== ORIGINAL && mine !== theirs;
-            const text = both ? <>Bis der <b>Test im Spiel</b> zeigt, ob die {label(cur)} eine eigene Datei hat, nutzt sie den Schuss der {label(other)}. Dort hast du schon einen anderen Sound – der bleibt; dein {label(cur)}-Sound wird mit gespeichert und wirkt nach dem Test.</>
-              : mine && mine !== ORIGINAL ? <>Die {label(cur)} nutzt vermutlich denselben Schuss wie die {label(other)} (noch nicht im Spiel getestet) – dein Sound gilt dann auch für die {label(other)}.</>
-              : theirs && theirs !== ORIGINAL ? <>Die {label(cur)} nutzt vermutlich denselben Schuss wie die {label(other)} (noch nicht im Spiel getestet) – dein {label(other)}-Sound gilt dann auch für die {label(cur)}.</> : null;
-            return text && <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div className="grow">{text}</div>{both && <Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button>}</div>;
+          {cur && fireTwin(cur) && (() => {
+            // ein Schuss für beide (im Spiel dieselbe Datei): die Wahl gilt automatisch für beide Waffen
+            const other = fireTwin(cur)!, mine = fire[cur];
+            const text = mine && mine !== ORIGINAL
+              ? <>Die {label(cur)} und die {label(other)} haben im Spiel denselben Schuss – dein Sound gilt für <b>beide</b>.</>
+              : <>Die {label(cur)} und die {label(other)} haben im Spiel denselben Schuss – was du hier wählst, gilt für <b>beide</b>.</>;
+            return <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div className="grow">{text}</div></div>;
           })()}
-          {fire[cur] && fire[cur] !== ORIGINAL && fireStatus(cur) && !ok(fireStatus(cur)!) && !SAME_SOUND[`${cur}:fire`] && (
+          {fire[cur] && fire[cur] !== ORIGINAL && !(shared && ENGINE_WEAPON[cur]) && fireStatus(cur) && !ok(fireStatus(cur)!) && !SAME_SOUND[`${cur}:fire`] && (
             fireStatus(cur)!.status === 'not-in-base'
               ? <div className="callout small" style={{ marginTop: 12 }}><Icon name="info" size={16} /><div>Deine Vorlage enthält den Schuss der {label(cur)} nicht. Nimm als Vorlage ein Soundpack, das die {label(cur)} auch ändert – dann wirkt dein Sound im Spiel.</div></div>
               : <div className="callout small" style={{ marginTop: 12 }}><Icon name="gamepad" size={16} /><div className="grow">Wird mit gespeichert, wirkt im Spiel aber erst, wenn SP Tool weiß, welcher GTA-Sound der Schuss der {label(cur)} ist. Das findest du mit dem <b>Test im Spiel</b> in zwei Minuten heraus (einmal schießen, Pieptöne zählen) – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>
@@ -655,6 +772,19 @@ export function CreateView() {
         {step > 0 && <Button variant="ghost" disabled={!!busy} onClick={() => setStep(step - 1)}>Zurück</Button>}
         <span className="grow" />
         {cur && !fire[cur] && <span className="small muted">Sound wählen oder „Original behalten“.</span>}
+        {step === DONE_STEP && engStatus && (
+          <button className="export-target" disabled={!!busy} title={exportPath || 'Zielordner wählen'}
+            onClick={() => void chooseFolder().catch((e) => toast('error', 'Ordner', e instanceof Error ? e.message : String(e)))}>
+            <span className="export-target-icon"><Icon name="folder" size={16} /></span>
+            <span className="export-target-text">
+              <span className="export-target-label">Exportieren nach</span>
+              {exportPath
+                ? <span className="export-target-path"><b>{folderLeaf(exportPath)}</b>{folderParent(exportPath) && <span className="faint"> · {folderParent(exportPath)}</span>}</span>
+                : <span className="export-target-path"><b>Ordner wählen</b></span>}
+            </span>
+            <span className="export-target-action">{exportPath ? 'Ändern' : 'Wählen'}</span>
+          </button>
+        )}
         {step < DONE_STEP ? <Button variant="primary" disabled={!stepOk(step) || !!busy} onClick={() => setStep(step + 1)}>Weiter</Button>
           : <Button variant="primary" size="lg" icon="hammer" disabled={!!busy || (!plan.items.length && !rest) || (!!rest && !!nothingChangesMessage(plan, rest.label))} onClick={() => void create()}>{busy ? 'Wird erstellt…' : 'Soundpack erstellen'}</Button>}
       </div>

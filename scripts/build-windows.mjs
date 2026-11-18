@@ -18,6 +18,20 @@ run(process.execPath, [resolve(root, 'scripts/build.mjs')], { cwd: root });
 rmSync(resolve(win, 'web'), { recursive: true, force: true });
 cpSync(resolve(root, 'dist'), resolve(win, 'web'), { recursive: true });
 
+// Soundpack-Engine (C#, engine/) → windows/engine/spengine.zip, wird in SPTool.exe eingebettet.
+// Braucht das .NET 8 SDK und das Submodule engine/external/CodeWalker (git submodule update --init).
+const enginePub = resolve(root, 'release/engine-publish');
+rmSync(enginePub, { recursive: true, force: true });
+run('dotnet', ['publish', resolve(root, 'engine/src/SpEngine/SpEngine.csproj'), '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+  '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:EnableCompressionInSingleFile=true', '-p:DebugType=none',
+  '-o', enginePub, '--nologo'], { cwd: resolve(root, 'engine') });
+const engineZip = resolve(win, 'engine/spengine.zip');
+rmSync(engineZip, { force: true });
+mkdirSync(resolve(win, 'engine'), { recursive: true });
+if (process.platform === 'win32') run('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path '${enginePub}\\*' -DestinationPath '${engineZip}' -Force`]);
+else run('zip', ['-r', '-X', '-9', engineZip, '.'], { cwd: enginePub });
+console.log('✓ windows/engine/spengine.zip (Soundpack-Engine)');
+
 writeFileSync(resolve(win, 'winres/winres.json'), JSON.stringify({
   RT_GROUP_ICON: { '#1': { '0000': ['icon-256.png', 'icon-48.png', 'icon-32.png', 'icon-16.png'] } },
   RT_MANIFEST: { '#1': { '0409': {

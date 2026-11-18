@@ -14,6 +14,11 @@ where node >nul 2>nul || ( echo Node.js fehlt: https://nodejs.org & start "" htt
 where go >nul 2>nul || ( echo Go fehlt: https://go.dev/dl & start "" https://go.dev/dl & pause & exit /b 1 )
 where go-winres >nul 2>nul || ( echo go-winres wird installiert... & go install github.com/tc-hib/go-winres@v0.3.3 || ( pause & exit /b 1 ) )
 
+where dotnet >nul 2>nul || ( echo .NET 8 SDK fehlt: https://dotnet.microsoft.com/download/dotnet/8.0 & start "" https://dotnet.microsoft.com/download/dotnet/8.0 & pause & exit /b 1 )
+git -c core.longpaths=true submodule update --init engine/external/CodeWalker
+dotnet test engine\SpEngine.sln
+if errorlevel 1 ( echo FEHLER: Engine-Tests fehlgeschlagen - Text oben an Claude schicken. & pause & exit /b 1 )
+
 if not exist node_modules ( call npm install || ( pause & exit /b 1 ) )
 call npm test
 if errorlevel 1 ( echo FEHLER: Tests fehlgeschlagen - Text oben an Claude schicken. & pause & exit /b 1 )

@@ -26,6 +26,8 @@ export interface Settings {
   devMode: boolean;
   fivemPath: string;
   gtaPath: string;
+  /** Windows app: folder the finished soundpack is exported to (chosen once, e.g. FiveM.app\mods). */
+  exportPath?: string;
   analytics: boolean;
   crashReports: boolean;
   checkUpdates: boolean;

@@ -342,7 +342,8 @@ func run() {
 	_, err := os.Stat(sessionMarker())
 	lastRunCrashed = err == nil
 	_ = os.WriteFile(sessionMarker(), nil, 0o644)
-	styleWindow(uintptr(w.Window()))
+	mainHwnd = uintptr(w.Window()) // owner for native dialogs (folder picker)
+	styleWindow(mainHwnd)
 	w.SetSize(1100, 700, webview2.HintMin)
 	w.Navigate(url)
 	w.Run() // returns when the window is closed
@@ -401,7 +402,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func native(w http.ResponseWriter, r *http.Request) {
-	if installAPI(w, r) || appPackageAPI(w, r) || updateAPI(w, r) || baseAPI(w, r) || downloadsAPI(w, r) || gtaAPI(w, r) {
+	if installAPI(w, r) || appPackageAPI(w, r) || updateAPI(w, r) || baseAPI(w, r) || downloadsAPI(w, r) || gtaAPI(w, r) || engineAPI(w, r) || exportAPI(w, r) {
 		return
 	}
 	switch r.URL.Path {

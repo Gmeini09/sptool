@@ -19,6 +19,10 @@ jobs:
       SPTOOL_LICENSE_PUBKEY: ${{ secrets.SPTOOL_LICENSE_PUBKEY || '5iVZDgeKEizromOavt_4watv_TymaL7np_99Lys_gEQ' }}
     steps:
       - uses: actions/checkout@v4
+        with: { submodules: true } # engine/external/CodeWalker
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - run: dotnet test engine/SpEngine.sln
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: actions/setup-go@v5

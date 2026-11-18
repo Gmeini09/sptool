@@ -13,3 +13,6 @@ release/
 
 # source snapshots
 /SPTool_Source_*.zip
+windows/engine/spengine.zip
+engine/**/bin/
+engine/**/obj/

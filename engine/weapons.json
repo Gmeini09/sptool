@@ -1,0 +1,9 @@
+﻿{
+  // Zielwaffen. "audioItem" leer lassen = automatisch aus weapons*.meta ermitteln.
+  // "kinds": Reload und/oder Fire.
+  "weapons": [
+    { "name": "WEAPON_PISTOL",     "displayName": "Pistol",       "kinds": [ "Reload" ] },
+    { "name": "WEAPON_PISTOL_MK2", "displayName": "Pistol Mk II", "kinds": [ "Reload" ] },
+    { "name": "WEAPON_PISTOL50",   "displayName": "Pistol .50",   "kinds": [ "Reload" ] }
+  ]
+}

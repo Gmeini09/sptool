@@ -26,6 +26,35 @@ export async function saveToDownloads(folder: string, files: Array<{ name: strin
   return { dir: null, names: files.map((f) => f.name), zip };
 }
 
+// ── Windows app: export into a folder the user picks ─────────────────────────────────────────────────────────────
+
+const native = (path: string, init?: RequestInit) =>
+  fetch(path, { method: 'POST', ...init, headers: { 'X-SPTool-Native': '1', ...(init?.headers ?? {}) } });
+
+/** Windows folder dialog; null when cancelled. Refuses the GTA V folder (SP Tool never writes into the game). */
+export async function pickExportFolder(initial = ''): Promise<string | null> {
+  const r = await native(`/native/export/pick?initial=${encodeURIComponent(initial)}`);
+  if (!r.ok) throw new Error((await r.text().catch(() => '')) || `Ordner-Dialog fehlgeschlagen (${r.status}).`);
+  return ((await r.json()) as { folder: string }).folder || null;
+}
+
+/** Writes WEAPONS_PLAYER.rpf / RESIDENT.rpf directly into `folder` (replacing files of the same name there). */
+export async function saveToFolder(folder: string, files: Array<{ name: string; bytes: Uint8Array }>): Promise<SavedFiles> {
+  let dir = folder;
+  for (const f of files) {
+    const r = await native(`/native/export/save?folder=${encodeURIComponent(folder)}&file=${encodeURIComponent(f.name)}`, {
+      headers: { 'Content-Type': 'application/octet-stream' }, body: new Blob([f.bytes as unknown as BlobPart]),
+    });
+    if (!r.ok) throw new Error((await r.text().catch(() => '')) || `${f.name} konnte nicht gespeichert werden (${r.status}).`);
+    dir = ((await r.json()) as { dir: string }).dir;
+  }
+  return { dir, names: files.map((f) => f.name) };
+}
+
+export async function showFolder(folder: string): Promise<boolean> {
+  return (await native(`/native/export/show?folder=${encodeURIComponent(folder)}`)).ok;
+}
+
 /** Opens Downloads\SP Tool\<folder> in Explorer (Windows app only). */
 export async function showDownloads(folder?: string): Promise<boolean> {
   if (!(await nativeInfo())) return false;

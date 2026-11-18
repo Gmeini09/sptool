@@ -122,3 +122,14 @@
 .nav-fold svg { transform: none; transition: transform .15s; opacity: .7; }
 .nav-fold svg.open { transform: rotate(90deg); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent-2, #5aa0ff); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* "Exportieren nach" – Zielordner neben "Soundpack erstellen": eine klickbare Karte, so hoch wie der Knopf */
+.export-target { display: flex; align-items: center; gap: 10px; height: 44px; max-width: 380px; min-width: 0; padding: 0 6px 0 6px; border-radius: var(--r-ctl, 10px); border: 1px solid var(--border); background: var(--input, rgba(255,255,255,.03)); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+.export-target:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--input, transparent)); }
+.export-target:disabled { opacity: .6; cursor: default; }
+.export-target-icon { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.export-target-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.export-target-label { font-size: 11px; color: var(--text-3, var(--muted)); text-transform: uppercase; letter-spacing: .04em; }
+.export-target-path { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.export-target-action { flex: none; margin-left: 4px; padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; color: var(--text-2, var(--text)); background: var(--border-soft, rgba(255,255,255,.06)); }
+.export-target:hover:not(:disabled) .export-target-action { color: var(--accent); }
