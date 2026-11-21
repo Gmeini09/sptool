@@ -6,6 +6,12 @@ jede Änderung ist eine Zeile mit `- `. Beim Bauen landet diese Datei in der App
 - Nach einem Update zeigt die App einmal „Neu in SP Tool …“, und unter Einstellungen → Updates steht der ganze Verlauf.
 Was ein Admin beim Verteilen selbst schreibt, ersetzt den Eintrag dieser Version bei allen Nutzern.
 
+## 1.10.18 – 21.11.2026
+- Soundpacks werden jetzt mit den Schritten von OpenIV + ArchiveFix gebaut: Ist ein Sound länger als sein Platz, baut SP Tool WEAPONS_PLAYER.rpf bzw. RESIDENT.rpf wie OpenIV neu auf, und die Windows-App zieht die fertigen Dateien danach selbst auf deine ArchiveFix.exe. Die ZIP enthält dann schon die verschlüsselten Dateien – einfach in den sfx-Ordner ziehen
+- ArchiveFix wird auf Desktop, in Downloads und Dokumente gefunden, oder du trägst den Pfad unter Einstellungen › Erweitert ein (dort siehst du auch, ob die Schlüssel-Dateien da sind)
+- Ohne ArchiveFix bleibt alles wie in 1.10.17 (SP Tool verschlüsselt selbst); läuft ArchiveFix nicht durch, zeigt die Fertig-Seite, wie man es von Hand macht
+- „Prüfen“ erkennt, ob ArchiveFix schon gelaufen ist
+
 ## 1.10.17 – 17.11.2026
 - Soundpacks werden jetzt genau so gebaut wie von Hand mit OpenIV: Ein Sound, der nicht in den alten Platz passt, kommt ans Ende von WEAPONS_PLAYER.rpf bzw. RESIDENT.rpf, und das Inhaltsverzeichnis wird wieder mit Rockstars NG-Verschlüsselung gespeichert – wie bei allen Soundpacks aus der Community. Alle anderen Dateien bleiben an ihrer Stelle und Byte für Byte original
 - Die Schlüssel dafür holt SP Tool einmal auf deinem PC: aus deiner GTA5.exe und aus CodeWalkers magic.dat (von GitHub, fest auf eine Version geprüft). Sie bleiben auf deinem PC, SP Tool liefert keine Schlüssel mit

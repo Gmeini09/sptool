@@ -30,6 +30,7 @@ import { saveToDownloads, showDownloads } from '../services/downloads';
 import { deleteBlob } from '../services/storage';
 import { ensureNgKeys } from '../services/ngKeys';
 import { checkInGame, sha256Hex, showSfxFolder, type CheckResult, type FileState } from '../services/modsCheck';
+import { applyArchiveFix, findArchiveFix } from '../services/archiveFix';
 import { openGameTest } from './GameTest';
 import { nativeInfo } from '../services/native';
 import { logger } from '../services/logger';
@@ -99,7 +100,7 @@ export function CreateView() {
   const [packOpen, setPackOpen] = useState(false);
   const [rest, setRest] = useState<Transplant | null>(null);
   const [showLib, setShowLib] = useState(false);
-  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; built: Array<{ name: string; sha256: string }>; pack: Pack; template: string } | null>(null);
+  const [done, setDone] = useState<{ dir: string | null; names: string[]; zip?: string; folder: string; plan: BuildPlan; built: Array<{ name: string; sha256: string; size: number; open: boolean }>; pack: Pack; template: string; archiveFix: string[]; archiveFixed: string[]; archiveFixMissing: boolean } | null>(null);
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const runCheck = async () => {
@@ -118,6 +119,7 @@ export function CreateView() {
     return () => window.removeEventListener(FILES_DROPPED, f);
   }, []);
   useEffect(() => { void nativeInfo().then((n) => setNative(!!n)).catch(() => setNative(false)); }, []);
+  useEffect(() => { void findArchiveFix(); }, []); // OpenIV + ArchiveFix way: longer sounds than the template fit
   useEffect(() => () => engine.stop(), []);
   // "Alle löschen" asks once more before the imported sounds of this step are gone
   const [confirmClear, setConfirmClear] = useState(false);
@@ -282,17 +284,25 @@ export function CreateView() {
       if (rest) { const msg = nothingChangesMessage(pl, rest.label); if (msg) throw new Error(msg); }
       if (!pl.ready && !rest) throw new Error(pl.items.some((i) => i.status === 'not-in-base') ? 'In deiner Vorlage fehlen die Dateien für deine Auswahl – nimm ein Soundpack mit WEAPONS_PLAYER.rpf und RESIDENT.rpf.' : `Deine Auswahl wirkt im Spiel noch nicht: SP Tool weiß noch nicht, wo GTA ${blockedLabels(pl).join(', ')} ablegt. Wähl bei der Pistol einen Schuss oder mach den Test im Spiel.`);
       addProject(p, false);
-      await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
+      // the OpenIV + ArchiveFix way when ArchiveFix.exe is on the PC; otherwise SP Tool's own NG encryption (needs keys)
+      setBusy('ArchiveFix wird gesucht…');
+      const afx = await findArchiveFix();
+      if (!afx?.hasKeys) await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
       const r = await runBuild(pl, pack, renderAssignment, (d, t, l) => { setBusy(d < t ? `Sound ${d + 1} von ${t} · ${l}` : 'WEAPONS_PLAYER.rpf und RESIDENT.rpf werden geschrieben…'); setProg(d < t ? d / t : null); }, { allowEmpty: !!rest, allArchives: true }); // always WEAPONS_PLAYER.rpf + RESIDENT.rpf
       if (sameAsBase(pack, r.outputs)) throw new Error(`Es hat sich nichts geändert – das Ergebnis wäre genau ${rest ? `„${rest.label}“` : 'deine Vorlage'}. ${blockedLabels(pl).length ? `${blockedLabels(pl).join(', ')} kann SP Tool noch nicht ins Spiel schreiben.` : 'Prüf, ob deine Sounds wirklich anders sind als die im Pack.'}`);
       const missing = ['WEAPONS_PLAYER.rpf', 'RESIDENT.rpf'].filter((n) => !r.outputs.some((o) => o.name.toLowerCase() === n.toLowerCase()));
       if (missing.length) { toast('warning', `${missing.join(' und ')} fehlt`, `Deine Vorlage enthält ${missing.join(' und ')} nicht, deshalb ist nur ${r.outputs.map((o) => o.name).join(' und ')} entstanden. Zieh beim nächsten Erstellen ein komplettes Soundpack (mit WEAPONS_PLAYER.rpf und RESIDENT.rpf) als Vorlage rein.`); setNeedBase(true); }
-      setBusy('Wird in deinen Downloads gespeichert…'); setProg(null);
-      const saved = await saveToDownloads(p.name, r.outputs.map((o) => ({ name: o.name, bytes: o.bytes })));
-      logger.info(`Soundpack erstellt: ${p.name} – ${r.replacedStreams} Sounds → ${saved.names.join(', ')}`);
-      const built = await Promise.all(r.outputs.map(async (o) => ({ name: o.name, sha256: await sha256Hex(o.bytes) })));
+      setProg(null);
+      // archives rebuilt like OpenIV (open table of contents) go through ArchiveFix right away, like dropping them onto it
+      const af = await applyArchiveFix(r.outputs, (s) => setBusy(s));
+      if (af.error) toast('warning', 'ArchiveFix hat nicht geklappt', `${af.error} – mach es nach dem Kopieren selbst (Dateien auf ArchiveFix.exe ziehen).`);
+      const outputs = af.outputs;
+      setBusy('Wird in deinen Downloads gespeichert…');
+      const saved = await saveToDownloads(p.name, outputs.map((o) => ({ name: o.name, bytes: o.bytes })));
+      logger.info(`Soundpack erstellt: ${p.name} – ${r.replacedStreams} Sounds → ${saved.names.join(', ')}${af.fixed.length ? ` (ArchiveFix: ${af.fixed.join(', ')})` : ''}`);
+      const built = await Promise.all(outputs.map(async (o) => ({ name: o.name, sha256: await sha256Hex(o.bytes), size: o.bytes.length, open: o.open })));
       setCheck(null);
-      setDone({ ...saved, folder: p.name, plan: pl, built, pack, template: rest ? `Reload & Rest von „${rest.label}“` : baseInfo()?.label ?? 'unbekannt' });
+      setDone({ ...saved, folder: p.name, plan: pl, built, pack, template: rest ? `Reload & Rest von „${rest.label}“` : baseInfo()?.label ?? 'unbekannt', archiveFix: outputs.filter((o) => o.open).map((o) => o.name), archiveFixed: af.fixed, archiveFixMissing: af.missing });
     } catch (e) {
       toast('error', 'Das hat nicht geklappt', e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); setProg(null); }
@@ -390,6 +400,7 @@ export function CreateView() {
         case 'old': return <><b>{n}</b> im sfx-Ordner ist noch die <b>alte</b> (vom {fmt(st.modified)}). Ersetz sie durch die aus der ZIP.</>;
         case 'subfolder': return <><b>{n}</b> liegt in <span className="mono">sfx\{st.path}</span> – in Unterordnern liest GTA sie nicht{st.old ? ', deshalb spielt es weiter die alte direkt in sfx' : ''}. Schieb sie direkt in den sfx-Ordner.</>;
         case 'renamed': return <><b>{n}</b> heißt im sfx-Ordner <span className="mono">{st.path}</span> – GTA lädt nur genau <b>{n}</b>. Alte Datei löschen und deine umbenennen.</>;
+        case 'needsFix': return <><b>{n}</b> liegt richtig im sfx-Ordner, aber <b>ArchiveFix</b> fehlt noch – zieh die Datei auf <span className="mono">ArchiveFix.exe</span>, sonst startet GTA mit „Invalid encryption type“.</>;
         case 'missing': return <><b>{n}</b> fehlt im sfx-Ordner.</>;
       }
     };
@@ -405,9 +416,13 @@ export function CreateView() {
             <ol style={{ margin: '4px 0 0', paddingLeft: 18 }}>
               <li><b>FiveM bzw. GTA komplett schließen</b> – die Sounds werden nur beim Start gelesen.</li>
               <li>ZIP öffnen und <b>{done.names.join(' + ')}</b> <b>direkt</b> in deinen <b>sfx</b>-Ordner ziehen (<span className="mono">Grand Theft Auto V\x64\audio\sfx</span>) und <b>„Dateien im Ziel ersetzen“</b> wählen. Sichere vorher einmal die Originaldateien von GTA.</li>
-              <li>Klick auf <b>„Prüfen“</b> – SP Tool sagt dir, ob wirklich dein neues Pack drinliegt. Dann FiveM starten.</li>
+              {done.archiveFix.length > 0 && <li>
+                <b>ArchiveFix</b> – {done.archiveFix.join(' und ')} {done.archiveFix.length > 1 ? 'sind' : 'ist'} wie mit OpenIV neu gebaut, das Spiel liest {done.archiveFix.length > 1 ? 'sie' : 'sie'} erst nach ArchiveFix{done.archiveFixMissing ? <> – <b>ArchiveFix.exe wurde nicht gefunden</b>, trag den Pfad unter Einstellungen › Erweitert ein, dann macht SP Tool das beim nächsten Mal selbst</> : ''}: im sfx-Ordner <b>{done.archiveFix.join(' und dann ')}</b> nacheinander auf <span className="mono">ArchiveFix.exe</span> ziehen (einmalig vorher <span className="mono">ArchiveFix.exe fetch</span>, während GTA lädt).
+              </li>}
+              <li>Klick auf <b>„Prüfen“</b> – SP Tool sagt dir, ob wirklich dein neues Pack drinliegt{done.archiveFix.length > 0 ? ' und ob ArchiveFix gelaufen ist' : ''}. Dann FiveM starten.</li>
             </ol>
           </div></div>
+          {done.archiveFixed.length > 0 && <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="check" size={16} /><div><b>Wie mit OpenIV + ArchiveFix gebaut:</b> {done.archiveFixed.join(' und ')} {done.archiveFixed.length > 1 ? 'sind' : 'ist'} neu aufgebaut und mit deiner ArchiveFix.exe verschlüsselt – einfach in den sfx-Ordner ziehen.</div></div>}
           {works.length > 0 && <div className="callout info small" style={{ textAlign: 'left' }}><Icon name="check" size={16} /><div><b>Wirkt im Spiel: {works.join(', ')}.</b></div></div>}
           {!done.names.some((n) => n.toLowerCase() === 'resident.rpf') && <div className="callout small" style={{ textAlign: 'left' }}><Icon name="alert" size={16} /><div><b>RESIDENT.rpf fehlt.</b> Deine Vorlage hat keine RESIDENT.rpf, deshalb ist nur WEAPONS_PLAYER.rpf entstanden. Zieh unter „Noch eins erstellen“ → „Soundpack erstellen“ ein komplettes Soundpack (ZIP oder WEAPONS_PLAYER.rpf + RESIDENT.rpf) als Vorlage rein und erstelle es noch einmal.</div></div>}
           {kept.length > 0 && <div className="callout small" style={{ textAlign: 'left' }}><Icon name="alert" size={16} /><div className="grow"><b>Noch ohne Wirkung: {kept.join(', ')}.</b> Diese Sounds bleiben im Spiel wie in der Vorlage, bis SP Tool weiß, wo GTA sie ablegt. Mit dem <b>Test im Spiel</b> findest du das in zwei Minuten heraus – danach einfach neu erstellen.</div><Button size="sm" icon="gamepad" onClick={openGameTest}>Im Spiel testen</Button></div>}

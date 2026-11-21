@@ -67,8 +67,9 @@ export function planBuild(project: Project, profiles: WeaponProfile[], mapping: 
   return { items, ready, blocked: items.length - ready };
 }
 
-export interface BuildOutput { name: string; bytes: Uint8Array; patchedContainers: number }
-export interface BuildResult { outputs: BuildOutput[]; replacedStreams: number }
+/** open: rebuilt like OpenIV with an open table of contents – ArchiveFix encrypts it before GTA reads it */
+export interface BuildOutput { name: string; bytes: Uint8Array; patchedContainers: number; open: boolean }
+export interface BuildResult { outputs: BuildOutput[]; replacedStreams: number; archiveFix: boolean }
 
 
 /** "Reload & Rest" of another soundpack: its archives are used as the base for one build. */
@@ -217,7 +218,7 @@ export async function runBuild(plan: BuildPlan, pack: Pack, render: (a: SlotAssi
   if (tooLong.size) throw new TooLongError([...tooLong.values()]);
   const outputs = exportPack(pack, byGroup, { includeUnchanged: opts.allArchives })
     .map((o) => ({ ...o, name: canonicalArchiveName(o.name) }));
-  return { outputs, replacedStreams: replaced };
+  return { outputs, replacedStreams: replaced, archiveFix: outputs.some((o) => o.open) };
 }
 
 export interface InGameSound {

@@ -401,7 +401,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func native(w http.ResponseWriter, r *http.Request) {
-	if installAPI(w, r) || appPackageAPI(w, r) || updateAPI(w, r) || baseAPI(w, r) || downloadsAPI(w, r) || gtaAPI(w, r) {
+	if installAPI(w, r) || appPackageAPI(w, r) || updateAPI(w, r) || baseAPI(w, r) || downloadsAPI(w, r) || gtaAPI(w, r) || archiveFixAPI(w, r) {
 		return
 	}
 	switch r.URL.Path {

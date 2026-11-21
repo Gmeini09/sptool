@@ -12,6 +12,7 @@ import { Button, Slider, Toggle } from '../components/ui';
 import { cacheStats, clearMetaCache } from '../library/assets';
 import type { Style } from '../models/types';
 import { logger } from '../services/logger';
+import { findArchiveFix } from '../services/archiveFix';
 import { isTauri, pickFolder } from '../services/tauri';
 import { ThemePicker } from './Welcome';
 import { FiveMCard, GtaCard } from './Home';
@@ -40,6 +41,27 @@ const PLANNED_TEXT: Partial<Record<Sec, string>> = {
 
 function Row({ t, d, children }: { t: string; d?: string; children: React.ReactNode }) {
   return <div className="set-row"><div className="grow"><div className="t">{t}</div>{d && <div className="d">{d}</div>}</div>{children}</div>;
+}
+
+/** Path of ArchiveFix.exe – SP Tool builds like OpenIV and runs ArchiveFix right after "Soundpack erstellen". */
+function ArchiveFixRow() {
+  const path = useApp((x) => x.settings.archiveFixPath);
+  const [text, setText] = useState(path);
+  const [state, setStateText] = useState<string | null>(null);
+  useEffect(() => setText(path), [path]);
+  const search = async (given: string) => {
+    updateSettings({ archiveFixPath: given.trim() });
+    const info = await findArchiveFix();
+    setStateText(info ? (info.hasKeys ? 'Gefunden – mit Schlüsseln, bereit. Soundpacks werden wie mit OpenIV gebaut und mit ArchiveFix verschlüsselt.' : 'Gefunden – aber die Schlüssel fehlen: einmal „ArchiveFix.exe fetch“ ausführen, während GTA lädt.') : isTauri() ? 'ArchiveFix.exe nicht gefunden.' : 'Geht nur in der Windows-App.');
+  };
+  return (
+    <Row t="ArchiveFix" d={state ?? 'SP Tool baut Soundpacks wie OpenIV und zieht die fertigen WEAPONS_PLAYER.rpf und RESIDENT.rpf danach selbst auf ArchiveFix.exe. Leer lassen = auf Desktop, in Downloads und Dokumente suchen.'}>
+      <form className="row" onSubmit={(e) => { e.preventDefault(); void search(text); }}>
+        <input className="input mono" style={{ width: 'min(300px, 32vw)' }} value={text} placeholder="C:\…\ArchiveFix\ArchiveFix.exe" onChange={(e) => setText(e.target.value)} aria-label="Pfad zu ArchiveFix.exe" />
+        <Button size="sm" type="submit">{text.trim() ? 'Prüfen' : 'Suchen'}</Button>
+      </form>
+    </Row>
+  );
 }
 
 export function SettingsView() {
@@ -147,6 +169,7 @@ export function SettingsView() {
         </>}
 
         {sec === 'Advanced' && <>
+          <ArchiveFixRow />
           <Row t="Entwicklermodus" d={devAllowed ? "Zeigt interne IDs, rohe Profildaten und andere technische Details." : "Braucht den Developer-Plan."}><Toggle on={s.devMode && devAllowed} onChange={(v) => devAllowed && updateSettings({ devMode: v })} label="Entwicklermodus" /></Row>
           <Row t="Cache für Wellenform und Analyse" d={`${stats.meta} Sounds analysiert · ${stats.audio} im Speicher. Wird bei Bedarf automatisch neu aufgebaut.`}>
             <Button size="sm" onClick={() => { const n = clearMetaCache(); setStats(cacheStats()); toast('success', 'Cache geleert', `${n} Einträge entfernt`); }}>Cache leeren</Button>

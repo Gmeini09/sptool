@@ -26,6 +26,8 @@ export interface Settings {
   devMode: boolean;
   fivemPath: string;
   gtaPath: string;
+  /** ArchiveFix.exe – runs on rebuilt archives right after "Soundpack erstellen" (found automatically when empty) */
+  archiveFixPath: string;
   analytics: boolean;
   crashReports: boolean;
   checkUpdates: boolean;
@@ -81,7 +83,7 @@ export interface AppState {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'turbo', accent: 'blue', reducedMotion: false, uiScale: 1, hoverPreview: false, volume: 0.85,
-  defaultStyle: 'Clean', devMode: false, fivemPath: '', gtaPath: '', analytics: false, crashReports: false, checkUpdates: true,
+  defaultStyle: 'Clean', devMode: false, fivemPath: '', gtaPath: '', archiveFixPath: '', analytics: false, crashReports: false, checkUpdates: true,
   simpleMode: false, hintsSeen: [], tourDone: false, tutorialOpen: false,
 };
 
