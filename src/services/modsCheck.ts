@@ -13,6 +13,7 @@ export type FileState =
   | { kind: 'old'; modified: number }                 // another file of that name lies in sfx\ (original or old pack)
   | { kind: 'subfolder'; path: string; old: boolean } // ours lies in a subfolder – the game does not read it there
   | { kind: 'renamed'; path: string }                 // ours lies in sfx\ under another name ("WEAPONS_PLAYER (2).rpf")
+  | { kind: 'needsFix' }                              // ours lies in sfx\ but ArchiveFix has not encrypted it yet
   | { kind: 'missing' };
 export interface CheckResult { modsDir: string; running: boolean; files: Array<{ name: string; state: FileState }>; allOk: boolean }
 
@@ -21,11 +22,16 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Pure part (tested): built files (name + hash) against a scan of the sfx folder. */
-export function compareWithMods(built: Array<{ name: string; sha256: string }>, scan: ScanResult): CheckResult {
-  const files = built.map(({ name, sha256 }) => {
+/**
+ * Pure part (tested): built files (name + hash) against a scan of the sfx folder. open: the file still has an open
+ * table of contents – the exact file in sfx\ needs ArchiveFix; ArchiveFix only encrypts the table of contents, so a
+ * file of the same size with another hash is ours after ArchiveFix.
+ */
+export function compareWithMods(built: Array<{ name: string; sha256: string; size?: number; open?: boolean }>, scan: ScanResult): CheckResult {
+  const files = built.map(({ name, sha256, size, open }) => {
     const top = scan.files.find((f) => f.depth === 0 && f.name.toLowerCase() === name.toLowerCase());
-    if (top && top.sha256 === sha256) return { name, state: { kind: 'ok' } as FileState };
+    if (top && top.sha256 === sha256) return { name, state: (open ? { kind: 'needsFix' } : { kind: 'ok' }) as FileState };
+    if (open && top && size !== undefined && top.size === size) return { name, state: { kind: 'ok' } as FileState };
     const ours = scan.files.filter((f) => f.sha256 === sha256);
     const renamed = ours.find((f) => f.depth === 0);
     if (renamed && canonicalArchiveName(renamed.name).toLowerCase() === name.toLowerCase()) return { name, state: { kind: 'renamed', path: renamed.path } as FileState };
@@ -47,7 +53,7 @@ export async function scanMods(): Promise<ScanResult> {
   return body as ScanResult;
 }
 
-export async function checkInGame(built: Array<{ name: string; sha256: string }>): Promise<CheckResult> {
+export async function checkInGame(built: Array<{ name: string; sha256: string; size?: number; open?: boolean }>): Promise<CheckResult> {
   return compareWithMods(built, await scanMods());
 }
 
