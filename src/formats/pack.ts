@@ -28,8 +28,17 @@ export interface ContainerGroup {
 }
 export interface Pack { archives: PackArchive[]; groups: ContainerGroup[] }
 
-/** An archive SP Tool can write larger containers into now: file list known, and for NG the keys are loaded. */
-export const archiveCanGrow = (a: PackArchive) => !!a.toc && (a.header.encryption !== 'ng' || !!activeNgKeys());
+let archiveFixMode = false;
+/**
+ * The OpenIV + ArchiveFix way (services/archiveFix.ts found ArchiveFix.exe): an archive whose container grows is
+ * rebuilt with an open table of contents like OpenIV, and ArchiveFix encrypts it afterwards – instead of SP Tool's own
+ * NG encryption.
+ */
+export function setArchiveFixMode(on: boolean) { archiveFixMode = on; }
+export const isArchiveFixMode = () => archiveFixMode;
+
+/** An archive SP Tool can write larger containers into now: file list known, and for NG the keys or ArchiveFix. */
+export const archiveCanGrow = (a: PackArchive) => !!a.toc && (a.header.encryption !== 'ng' || archiveFixMode || !!activeNgKeys());
 /** The container may get larger than its place in the template (every archive holding a copy can grow). */
 export const canGrowNow = (pack: Pack, g: ContainerGroup) => g.canGrow && g.refs.every((r) => archiveCanGrow(pack.archives[r.archive]));
 
@@ -83,7 +92,8 @@ export function fitContainer(awc: Uint8Array, length: number): Uint8Array {
   return out;
 }
 
-export interface ExportedArchive { name: string; bytes: Uint8Array; patchedContainers: number; rebuilt: boolean }
+/** open: the table of contents is open (OPEN) – ArchiveFix has to encrypt it before GTA reads it from x64/audio/sfx */
+export interface ExportedArchive { name: string; bytes: Uint8Array; patchedContainers: number; rebuilt: boolean; open: boolean }
 
 /** replacements: group id → (stream id → new stream). Returns patched copies of every touched archive. */
 export function exportPack(pack: Pack, replacements: Map<number, Map<number, AwcStream>>, opts: { includeUnchanged?: boolean } = {}): ExportedArchive[] {
@@ -99,24 +109,26 @@ export function exportPack(pack: Pack, replacements: Map<number, Map<number, Awc
     }
     for (const r of g.refs) perArchive[r.archive].set(r.offset, { ref: r, awc });
   }
+  const isOpen = (b: Uint8Array) => readRpfHeader(b).encryption === 'open';
   const out = pack.archives.map((a, ai): ExportedArchive => {
     const repl = perArchive[ai];
-    if (!repl.size) return { name: a.name, bytes: a.bytes, patchedContainers: 0, rebuilt: false };
+    if (!repl.size) return { name: a.name, bytes: a.bytes, patchedContainers: 0, rebuilt: false, open: false };
     const grows = [...repl.values()].some((x) => x.awc.length > x.ref.length);
     // containers that fit go in place first (the table of contents stays as it is)
     let bytes = a.bytes;
     for (const { ref, awc } of repl.values()) if (awc.length <= ref.length) bytes = patchAwcInPlace(bytes, ref, fitContainer(awc, ref.length)); // copy-on-write
-    if (!grows) return { name: a.name, bytes, patchedContainers: repl.size, rebuilt: false };
+    if (!grows) return { name: a.name, bytes, patchedContainers: repl.size, rebuilt: false, open: isOpen(bytes) };
     if (!a.toc) throw new RpfError(`${a.name}: Inhaltsverzeichnis unbekannt – das Archiv kann nicht neu aufgebaut werden.`);
-    if (a.header.encryption === 'ng') {
+    if (a.header.encryption === 'ng' && !archiveFixMode) {
       // like OpenIV: the larger files are appended, the table of contents is encrypted again with NG
       const larger = new Map([...repl.values()].filter((x) => x.awc.length > x.ref.length).map((x) => [x.ref.offset, x.awc] as const));
-      return { name: a.name, bytes: appendRpfNg(bytes, a.name, larger), patchedContainers: repl.size, rebuilt: true };
+      return { name: a.name, bytes: appendRpfNg(bytes, a.name, larger), patchedContainers: repl.size, rebuilt: true, open: false };
     }
+    // rebuilt like OpenIV with an open table of contents (ArchiveFix encrypts it afterwards); every other file byte for byte
     const files = a.toc.map((f) => ({ name: f.name, data: repl.get(f.offset)?.awc ?? a.bytes.subarray(f.offset, f.offset + f.length) }));
     const placed = new Set(a.toc.map((f) => f.offset));
     for (const off of repl.keys()) if (!placed.has(off)) throw new RpfError(`${a.name}: Container bei ${off} steht nicht im Inhaltsverzeichnis.`);
-    return { name: a.name, bytes: writeRpfOpen(files), patchedContainers: repl.size, rebuilt: true };
+    return { name: a.name, bytes: writeRpfOpen(files), patchedContainers: repl.size, rebuilt: true, open: true };
   });
   // includeUnchanged: untouched archives come along as they are (a soundpack is always WEAPONS_PLAYER + RESIDENT)
   return opts.includeUnchanged ? out : out.filter((o) => o.patchedContainers > 0);
