@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { navigate, notify, toast, useApp } from '../app/store';
 import { Icon } from '../components/Icon';
+import { applyArchiveFix, findArchiveFix } from '../services/archiveFix';
 import { Button, DoneMark, EmptyState, Progress } from '../components/ui';
 import { loadMapping } from '../formats/mapping';
 import { planBuild, runBuild, type BuildResult, type SlotStatus } from '../projects/build';
@@ -45,8 +46,13 @@ export function BuildView() {
     if (!plan || !base) return;
     setBusy('Sounds werden berechnet…'); setProg(0); setResult(null);
     try {
-      await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
-      const r = await runBuild(plan, base.pack, renderAssignment, (d, t, label) => { setBusy(d < t ? `Sound ${d + 1}/${t} wird berechnet · ${label}` : 'Archive werden geschrieben…'); setProg(d < t ? d / t : null); }, { allArchives: true });
+      // the OpenIV + ArchiveFix way when ArchiveFix.exe is on the PC; otherwise SP Tool's own NG encryption (needs keys)
+      const afx = await findArchiveFix();
+      if (!afx?.hasKeys) await ensureNgKeys().catch(() => { /* only needed for sounds longer than the template – runBuild says so */ });
+      const built = await runBuild(plan, base.pack, renderAssignment, (d, t, label) => { setBusy(d < t ? `Sound ${d + 1}/${t} wird berechnet · ${label}` : 'Archive werden geschrieben…'); setProg(d < t ? d / t : null); }, { allArchives: true });
+      const af = await applyArchiveFix(built.outputs, (s) => setBusy(s));
+      if (af.error) toast('warning', 'ArchiveFix hat nicht geklappt', `${af.error} – zieh die Dateien nach dem Kopieren selbst auf ArchiveFix.exe.`);
+      const r = { ...built, outputs: af.outputs, archiveFix: af.outputs.some((o) => o.open) };
       setResult(r);
       logger.info(`Build ${project.name}: ${r.replacedStreams} streams → ${r.outputs.map((o) => o.name).join(', ')}`);
       notify('Soundpack gebaut', `${project.name}: ${r.outputs.map((o) => o.name).join(' + ')}`);
@@ -113,6 +119,7 @@ export function BuildView() {
         <div className="panel inst-done">
           <div className="panel-body">
             <div className="row"><DoneMark /><div className="grow"><b>Gebaut: {result.outputs.map((o) => o.name).join(' + ')}</b><div className="small muted">{result.replacedStreams} Spielsounds ersetzt · {result.outputs.map((o) => `${o.name} ${fmtSize(o.bytes.byteLength)}`).join(' · ')}</div></div></div>
+            {result.archiveFix && <div className="callout small" style={{ marginTop: 10 }}><Icon name="info" size={16} /><div><b>Danach ArchiveFix:</b> {result.outputs.filter((o) => o.open).map((o) => o.name).join(' und ')} {result.outputs.filter((o) => o.open).length > 1 ? 'sind' : 'ist'} wie mit OpenIV neu gebaut, aber ArchiveFix lief nicht. Nach dem Kopieren in den sfx-Ordner jede davon auf <span className="mono">ArchiveFix.exe</span> ziehen (Pfad für das automatische Ausführen unter Einstellungen › Erweitert) – sonst startet GTA mit „Invalid encryption type“.</div></div>}
             <div className="row" style={{ marginTop: 12, gap: 8 }}>
               <Button variant="primary" icon="download" onClick={async () => { try { const s = await saveToDownloads(project.name, result.outputs.map((o) => ({ name: o.name, bytes: o.bytes }))); toast('success', 'Als ZIP gespeichert', `${s.zip} ${s.dir ? 'liegt in Downloads › SP Tool' : 'liegt in deinem Download-Ordner'} – die Dateien darin direkt in GTA V › x64 › audio › sfx ziehen (kein Unterordner), dann FiveM neu starten.`); if (s.dir) void showDownloads(); } catch (e) { toast('error', 'Speichern fehlgeschlagen', e instanceof Error ? e.message : String(e)); } }}>Als ZIP speichern</Button>
             </div>
